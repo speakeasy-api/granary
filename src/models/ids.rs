@@ -1,0 +1,191 @@
+use rand::Rng;
+
+use crate::error::{GranaryError, Result};
+
+/// Base32 alphabet (Crockford-style, excludes I, L, O, U to avoid confusion)
+const BASE32_ALPHABET: &[u8] = b"0123456789abcdefghjkmnpqrstvwxyz";
+
+/// Generate a random suffix using base32 encoding
+pub fn generate_suffix(len: usize) -> String {
+    let mut rng = rand::rng();
+    (0..len)
+        .map(|_| BASE32_ALPHABET[rng.random_range(0..32)] as char)
+        .collect()
+}
+
+/// Normalize a string to be used as a slug
+/// - Lowercase
+/// - Replace non-alphanumeric with hyphens
+/// - Collapse multiple hyphens
+/// - Trim leading/trailing hyphens
+pub fn normalize_slug(s: &str) -> String {
+    let slug: String = s
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+
+    // Collapse multiple hyphens and trim
+    let mut result = String::new();
+    let mut prev_hyphen = true; // Start true to skip leading hyphens
+    for c in slug.chars() {
+        if c == '-' {
+            if !prev_hyphen {
+                result.push(c);
+            }
+            prev_hyphen = true;
+        } else {
+            result.push(c);
+            prev_hyphen = false;
+        }
+    }
+
+    // Trim trailing hyphen
+    if result.ends_with('-') {
+        result.pop();
+    }
+
+    result
+}
+
+/// Generate a project ID from a name
+/// Format: <slug>-<suffix>
+/// Example: "my-project-5h18"
+pub fn generate_project_id(name: &str) -> String {
+    let slug = normalize_slug(name);
+    let suffix = generate_suffix(4);
+    format!("{}-{}", slug, suffix)
+}
+
+/// Generate a task ID from a project ID and task number
+/// Format: <project_id>-task-<n>
+/// Example: "my-project-5h18-task-321"
+pub fn generate_task_id(project_id: &str, task_number: i64) -> String {
+    format!("{}-task-{}", project_id, task_number)
+}
+
+/// Generate a comment ID from a parent ID and comment number
+/// Format: <parent_id>-comment-<n>
+/// Example: "my-project-5h18-task-321-comment-2"
+pub fn generate_comment_id(parent_id: &str, comment_number: i64) -> String {
+    format!("{}-comment-{}", parent_id, comment_number)
+}
+
+/// Generate an artifact ID from a parent ID and artifact number
+/// Format: <parent_id>-artifact-<n>
+pub fn generate_artifact_id(parent_id: &str, artifact_number: i64) -> String {
+    format!("{}-artifact-{}", parent_id, artifact_number)
+}
+
+/// Generate a session ID
+/// Format: sess-<date>-<suffix>
+/// Example: "sess-20260111-7f2c"
+pub fn generate_session_id() -> String {
+    let date = chrono::Utc::now().format("%Y%m%d");
+    let suffix = generate_suffix(4);
+    format!("sess-{}-{}", date, suffix)
+}
+
+/// Generate a checkpoint ID
+/// Format: chkpt-<suffix>
+pub fn generate_checkpoint_id() -> String {
+    let suffix = generate_suffix(8);
+    format!("chkpt-{}", suffix)
+}
+
+/// Parse a project ID to extract the slug
+pub fn parse_project_slug(project_id: &str) -> Result<&str> {
+    // Project ID format: <slug>-<4char suffix>
+    // Find the last hyphen that separates slug from suffix
+    if project_id.len() < 5 {
+        return Err(GranaryError::InvalidId(format!(
+            "Project ID too short: {}",
+            project_id
+        )));
+    }
+
+    let suffix_start = project_id.len() - 4;
+    if project_id.as_bytes()[suffix_start - 1] != b'-' {
+        return Err(GranaryError::InvalidId(format!(
+            "Invalid project ID format: {}",
+            project_id
+        )));
+    }
+
+    Ok(&project_id[..suffix_start - 1])
+}
+
+/// Parse a task ID to extract the project ID and task number
+pub fn parse_task_id(task_id: &str) -> Result<(&str, i64)> {
+    // Task ID format: <project_id>-task-<n>
+    let task_marker = "-task-";
+    let pos = task_id
+        .rfind(task_marker)
+        .ok_or_else(|| GranaryError::InvalidId(format!("Invalid task ID format: {}", task_id)))?;
+
+    let project_id = &task_id[..pos];
+    let task_num_str = &task_id[pos + task_marker.len()..];
+    let task_number = task_num_str
+        .parse::<i64>()
+        .map_err(|_| GranaryError::InvalidId(format!("Invalid task number in ID: {}", task_id)))?;
+
+    Ok((project_id, task_number))
+}
+
+/// Parse a comment ID to extract the parent ID and comment number
+pub fn parse_comment_id(comment_id: &str) -> Result<(&str, i64)> {
+    // Comment ID format: <parent_id>-comment-<n>
+    let comment_marker = "-comment-";
+    let pos = comment_id.rfind(comment_marker).ok_or_else(|| {
+        GranaryError::InvalidId(format!("Invalid comment ID format: {}", comment_id))
+    })?;
+
+    let parent_id = &comment_id[..pos];
+    let comment_num_str = &comment_id[pos + comment_marker.len()..];
+    let comment_number = comment_num_str.parse::<i64>().map_err(|_| {
+        GranaryError::InvalidId(format!("Invalid comment number in ID: {}", comment_id))
+    })?;
+
+    Ok((parent_id, comment_number))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_slug() {
+        assert_eq!(normalize_slug("My Big Project"), "my-big-project");
+        assert_eq!(normalize_slug("  test  "), "test");
+        assert_eq!(normalize_slug("foo--bar"), "foo-bar");
+        assert_eq!(normalize_slug("Hello World!"), "hello-world");
+    }
+
+    #[test]
+    fn test_generate_project_id() {
+        let id = generate_project_id("My Project");
+        assert!(id.starts_with("my-project-"));
+        assert_eq!(id.len(), "my-project-".len() + 4);
+    }
+
+    #[test]
+    fn test_generate_task_id() {
+        let id = generate_task_id("my-project-5h18", 42);
+        assert_eq!(id, "my-project-5h18-task-42");
+    }
+
+    #[test]
+    fn test_parse_task_id() {
+        let (project_id, task_num) = parse_task_id("my-project-5h18-task-42").unwrap();
+        assert_eq!(project_id, "my-project-5h18");
+        assert_eq!(task_num, 42);
+    }
+
+    #[test]
+    fn test_parse_comment_id() {
+        let (parent_id, comment_num) =
+            parse_comment_id("my-project-5h18-task-42-comment-3").unwrap();
+        assert_eq!(parent_id, "my-project-5h18-task-42");
+        assert_eq!(comment_num, 3);
+    }
+}

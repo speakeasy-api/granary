@@ -1,0 +1,366 @@
+pub mod json;
+pub mod prompt;
+pub mod table;
+
+use crate::models::*;
+
+/// Output format enum
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OutputFormat {
+    #[default]
+    Table,
+    Json,
+    Yaml,
+    Md,
+    Prompt,
+}
+
+impl std::str::FromStr for OutputFormat {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "table" => Ok(OutputFormat::Table),
+            "json" => Ok(OutputFormat::Json),
+            "yaml" => Ok(OutputFormat::Yaml),
+            "md" | "markdown" => Ok(OutputFormat::Md),
+            "prompt" => Ok(OutputFormat::Prompt),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Format output based on the selected format
+pub struct Formatter {
+    pub format: OutputFormat,
+}
+
+impl Formatter {
+    pub fn new(format: OutputFormat) -> Self {
+        Self { format }
+    }
+
+    pub fn format_project(&self, project: &Project) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_project(project),
+            OutputFormat::Yaml => yaml_format_project(project),
+            OutputFormat::Md => md_format_project(project),
+            OutputFormat::Prompt => prompt::format_project(project),
+            OutputFormat::Table => table::format_project(project),
+        }
+    }
+
+    pub fn format_projects(&self, projects: &[Project]) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_projects(projects),
+            OutputFormat::Yaml => yaml_format_projects(projects),
+            OutputFormat::Md => md_format_projects(projects),
+            OutputFormat::Prompt => prompt::format_projects(projects),
+            OutputFormat::Table => table::format_projects(projects),
+        }
+    }
+
+    pub fn format_task(&self, task: &Task) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_task(task),
+            OutputFormat::Yaml => yaml_format_task(task),
+            OutputFormat::Md => md_format_task(task),
+            OutputFormat::Prompt => prompt::format_task(task),
+            OutputFormat::Table => table::format_task(task),
+        }
+    }
+
+    pub fn format_tasks(&self, tasks: &[Task]) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_tasks(tasks),
+            OutputFormat::Yaml => yaml_format_tasks(tasks),
+            OutputFormat::Md => md_format_tasks(tasks),
+            OutputFormat::Prompt => prompt::format_tasks(tasks),
+            OutputFormat::Table => table::format_tasks(tasks),
+        }
+    }
+
+    pub fn format_comment(&self, comment: &Comment) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_comment(comment),
+            OutputFormat::Yaml => yaml_format_comment(comment),
+            OutputFormat::Md => md_format_comment(comment),
+            OutputFormat::Prompt => prompt::format_comment(comment),
+            OutputFormat::Table => table::format_comment(comment),
+        }
+    }
+
+    pub fn format_comments(&self, comments: &[Comment]) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_comments(comments),
+            OutputFormat::Yaml => yaml_format_comments(comments),
+            OutputFormat::Md => md_format_comments(comments),
+            OutputFormat::Prompt => prompt::format_comments(comments),
+            OutputFormat::Table => table::format_comments(comments),
+        }
+    }
+
+    pub fn format_session(&self, session: &Session) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_session(session),
+            OutputFormat::Yaml => yaml_format_session(session),
+            OutputFormat::Md => md_format_session(session),
+            OutputFormat::Prompt => prompt::format_session(session),
+            OutputFormat::Table => table::format_session(session),
+        }
+    }
+
+    pub fn format_sessions(&self, sessions: &[Session]) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_sessions(sessions),
+            OutputFormat::Yaml => yaml_format_sessions(sessions),
+            OutputFormat::Md => md_format_sessions(sessions),
+            OutputFormat::Prompt => prompt::format_sessions(sessions),
+            OutputFormat::Table => table::format_sessions(sessions),
+        }
+    }
+
+    pub fn format_checkpoint(&self, checkpoint: &Checkpoint) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_checkpoint(checkpoint),
+            OutputFormat::Yaml => yaml_format_checkpoint(checkpoint),
+            OutputFormat::Md => md_format_checkpoint(checkpoint),
+            OutputFormat::Prompt => prompt::format_checkpoint(checkpoint),
+            OutputFormat::Table => table::format_checkpoint(checkpoint),
+        }
+    }
+
+    pub fn format_checkpoints(&self, checkpoints: &[Checkpoint]) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_checkpoints(checkpoints),
+            OutputFormat::Yaml => yaml_format_checkpoints(checkpoints),
+            OutputFormat::Md => md_format_checkpoints(checkpoints),
+            OutputFormat::Prompt => prompt::format_checkpoints(checkpoints),
+            OutputFormat::Table => table::format_checkpoints(checkpoints),
+        }
+    }
+
+    pub fn format_artifact(&self, artifact: &Artifact) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_artifact(artifact),
+            OutputFormat::Yaml => yaml_format_artifact(artifact),
+            _ => table::format_artifact(artifact),
+        }
+    }
+
+    pub fn format_artifacts(&self, artifacts: &[Artifact]) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_artifacts(artifacts),
+            OutputFormat::Yaml => yaml_format_artifacts(artifacts),
+            _ => table::format_artifacts(artifacts),
+        }
+    }
+
+    pub fn format_next_task(&self, task: Option<&Task>, reason: Option<&str>) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_next_task(task, reason),
+            OutputFormat::Prompt => prompt::format_next_task(task, reason),
+            _ => table::format_next_task(task, reason),
+        }
+    }
+}
+
+// YAML formatters (using serde_yaml)
+fn yaml_format_project(project: &Project) -> String {
+    serde_yaml::to_string(project).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_projects(projects: &[Project]) -> String {
+    serde_yaml::to_string(projects).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_task(task: &Task) -> String {
+    serde_yaml::to_string(task).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_tasks(tasks: &[Task]) -> String {
+    serde_yaml::to_string(tasks).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_comment(comment: &Comment) -> String {
+    serde_yaml::to_string(comment).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_comments(comments: &[Comment]) -> String {
+    serde_yaml::to_string(comments).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_session(session: &Session) -> String {
+    serde_yaml::to_string(session).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_sessions(sessions: &[Session]) -> String {
+    serde_yaml::to_string(sessions).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_checkpoint(checkpoint: &Checkpoint) -> String {
+    serde_yaml::to_string(checkpoint).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_checkpoints(checkpoints: &[Checkpoint]) -> String {
+    serde_yaml::to_string(checkpoints).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_artifact(artifact: &Artifact) -> String {
+    serde_yaml::to_string(artifact).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_artifacts(artifacts: &[Artifact]) -> String {
+    serde_yaml::to_string(artifacts).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+// Markdown formatters
+fn md_format_project(project: &Project) -> String {
+    let mut md = String::new();
+    md.push_str(&format!("# {}\n\n", project.name));
+    md.push_str(&format!("**ID:** `{}`\n", project.id));
+    md.push_str(&format!("**Status:** {}\n", project.status));
+    if let Some(owner) = &project.owner {
+        md.push_str(&format!("**Owner:** {}\n", owner));
+    }
+    if let Some(desc) = &project.description {
+        md.push_str(&format!("\n{}\n", desc));
+    }
+    let tags = project.tags_vec();
+    if !tags.is_empty() {
+        md.push_str(&format!("\n**Tags:** {}\n", tags.join(", ")));
+    }
+    md
+}
+
+fn md_format_projects(projects: &[Project]) -> String {
+    let mut md = String::from("# Projects\n\n");
+    for project in projects {
+        md.push_str(&format!(
+            "- **{}** (`{}`) - {}\n",
+            project.name, project.id, project.status
+        ));
+    }
+    md
+}
+
+fn md_format_task(task: &Task) -> String {
+    let mut md = String::new();
+    let checkbox = if task.status == "done" { "[x]" } else { "[ ]" };
+    md.push_str(&format!("## {} {}\n\n", checkbox, task.title));
+    md.push_str(&format!("**ID:** `{}`\n", task.id));
+    md.push_str(&format!(
+        "**Status:** {} | **Priority:** {}\n",
+        task.status, task.priority
+    ));
+    if let Some(owner) = &task.owner {
+        md.push_str(&format!("**Owner:** {}\n", owner));
+    }
+    if let Some(desc) = &task.description {
+        md.push_str(&format!("\n{}\n", desc));
+    }
+    if let Some(reason) = &task.blocked_reason {
+        md.push_str(&format!("\n**Blocked:** {}\n", reason));
+    }
+    md
+}
+
+fn md_format_tasks(tasks: &[Task]) -> String {
+    let mut md = String::from("# Tasks\n\n");
+    for task in tasks {
+        let checkbox = if task.status == "done" { "[x]" } else { "[ ]" };
+        let blocked = if task.blocked_reason.is_some() {
+            " (blocked)"
+        } else {
+            ""
+        };
+        md.push_str(&format!(
+            "- {} **{}** `{}` [{}]{}",
+            checkbox, task.title, task.id, task.priority, blocked
+        ));
+        if let Some(owner) = &task.owner {
+            md.push_str(&format!(" @{}", owner));
+        }
+        md.push('\n');
+    }
+    md
+}
+
+fn md_format_comment(comment: &Comment) -> String {
+    let mut md = String::new();
+    md.push_str(&format!("### {} ({})\n\n", comment.kind, comment.id));
+    if let Some(author) = &comment.author {
+        md.push_str(&format!("**Author:** {} | ", author));
+    }
+    md.push_str(&format!("**Created:** {}\n\n", comment.created_at));
+    md.push_str(&comment.content);
+    md.push('\n');
+    md
+}
+
+fn md_format_comments(comments: &[Comment]) -> String {
+    let mut md = String::from("# Comments\n\n");
+    for comment in comments {
+        let author = comment.author.as_deref().unwrap_or("anonymous");
+        md.push_str(&format!(
+            "- **[{}]** {} - _{}_\n",
+            comment.kind, comment.content, author
+        ));
+    }
+    md
+}
+
+fn md_format_session(session: &Session) -> String {
+    let mut md = String::new();
+    let name = session.name.as_deref().unwrap_or("Unnamed Session");
+    md.push_str(&format!("# Session: {}\n\n", name));
+    md.push_str(&format!("**ID:** `{}`\n", session.id));
+    if let Some(mode) = &session.mode {
+        md.push_str(&format!("**Mode:** {}\n", mode));
+    }
+    if let Some(owner) = &session.owner {
+        md.push_str(&format!("**Owner:** {}\n", owner));
+    }
+    let status = if session.is_closed() {
+        "Closed"
+    } else {
+        "Active"
+    };
+    md.push_str(&format!("**Status:** {}\n", status));
+    if let Some(focus) = &session.focus_task_id {
+        md.push_str(&format!("**Focus Task:** `{}`\n", focus));
+    }
+    md
+}
+
+fn md_format_sessions(sessions: &[Session]) -> String {
+    let mut md = String::from("# Sessions\n\n");
+    for session in sessions {
+        let name = session.name.as_deref().unwrap_or("Unnamed");
+        let status = if session.is_closed() {
+            "closed"
+        } else {
+            "active"
+        };
+        md.push_str(&format!("- **{}** (`{}`) - {}\n", name, session.id, status));
+    }
+    md
+}
+
+fn md_format_checkpoint(checkpoint: &Checkpoint) -> String {
+    format!(
+        "## Checkpoint: {}\n\n**ID:** `{}`\n**Session:** `{}`\n**Created:** {}\n",
+        checkpoint.name, checkpoint.id, checkpoint.session_id, checkpoint.created_at
+    )
+}
+
+fn md_format_checkpoints(checkpoints: &[Checkpoint]) -> String {
+    let mut md = String::from("# Checkpoints\n\n");
+    for cp in checkpoints {
+        md.push_str(&format!(
+            "- **{}** (`{}`) - {}\n",
+            cp.name, cp.id, cp.created_at
+        ));
+    }
+    md
+}
