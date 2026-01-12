@@ -1,4 +1,8 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "granary",
+  "version": "0.1.0",
+  "description": "Context hub for agentic workflows - manage projects, tasks, sessions, and multi-agent coordination",
   "owner": {
     "name": "Daniel Kovacs",
     "email": "kovacsemod@gmail.com"
@@ -8,11 +12,12 @@
       "name": "granary",
       "description": "Context hub for agentic workflows - manage projects, tasks, sessions, and multi-agent coordination",
       "version": "0.1.0",
-      "license": "MIT",
-      "repository": "https://github.com/danielkov/granary",
-      "homepage": "https://github.com/danielkov/granary",
-      "keywords": ["context", "workflow", "agents", "tasks", "sessions"],
-      "categories": ["productivity", "development"]
+      "author": {
+        "name": "Daniel Kovacs",
+        "email": "kovacsemod@gmail.com"
+      },
+      "source": ".",
+      "category": "productivity"
     }
   ]
 }
