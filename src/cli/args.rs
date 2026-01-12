@@ -69,6 +69,12 @@ pub enum Commands {
     /// Check workspace health
     Doctor,
 
+    /// Show any entity by ID (auto-detects type: project, task, session, checkpoint, comment, artifact)
+    Show {
+        /// Entity ID
+        id: String,
+    },
+
     /// List all projects or create a new one
     Projects {
         #[command(subcommand)]

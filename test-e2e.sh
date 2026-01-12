@@ -106,9 +106,13 @@ echo "Started task: $TASK1_ID"
 
 echo ""
 echo "=== 9. Add Comments ==="
-granary task "$TASK1_ID" comments create --content "Starting schema design" --kind progress --author "Bob"
-granary task "$TASK1_ID" comments create --content "Decided to use UUID for primary keys" --kind decision --author "Bob"
-echo "Comments added."
+COMMENT1_OUTPUT=$(granary task "$TASK1_ID" comments create --content "Starting schema design" --kind progress --author "Bob" --json)
+COMMENT1_ID=$(echo "$COMMENT1_OUTPUT" | tr -d ' \n' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "Created comment: $COMMENT1_ID"
+
+COMMENT2_OUTPUT=$(granary task "$TASK1_ID" comments create --content "Decided to use UUID for primary keys" --kind decision --author "Bob" --json)
+COMMENT2_ID=$(echo "$COMMENT2_OUTPUT" | tr -d ' \n' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "Created comment: $COMMENT2_ID"
 
 echo ""
 echo "List comments:"
@@ -119,9 +123,13 @@ granary task "$TASK1_ID" comments
 # =============================================================================
 echo ""
 echo "=== 10. Add Artifacts ==="
-granary task "$TASK1_ID" artifacts add file "schema.sql" --description "Database schema file"
-granary task "$TASK1_ID" artifacts add url "https://docs.example.com/db-design" --description "Design document"
-echo "Artifacts added."
+ARTIFACT1_OUTPUT=$(granary task "$TASK1_ID" artifacts add file "schema.sql" --description "Database schema file" --json)
+ARTIFACT1_ID=$(echo "$ARTIFACT1_OUTPUT" | tr -d ' \n' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "Created artifact: $ARTIFACT1_ID"
+
+ARTIFACT2_OUTPUT=$(granary task "$TASK1_ID" artifacts add url "https://docs.example.com/db-design" --description "Design document" --json)
+ARTIFACT2_ID=$(echo "$ARTIFACT2_OUTPUT" | tr -d ' \n' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "Created artifact: $ARTIFACT2_ID"
 
 echo ""
 echo "List artifacts:"
@@ -185,16 +193,49 @@ granary context --include projects,tasks,comments
 # =============================================================================
 echo ""
 echo "=== 17. Checkpoints ==="
-granary checkpoint create "mid-sprint"
-echo "Checkpoint created."
+CHECKPOINT_OUTPUT=$(granary checkpoint create "mid-sprint" --json)
+CHECKPOINT_ID=$(echo "$CHECKPOINT_OUTPUT" | tr -d ' \n' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "Created checkpoint: $CHECKPOINT_ID"
 
 granary checkpoint list
 
 # =============================================================================
-# 18. Block and unblock
+# 18. Test granary show for all entity types
 # =============================================================================
 echo ""
-echo "=== 18. Block and Unblock Tasks ==="
+echo "=== 18. Test 'granary show' Command ==="
+
+echo ""
+echo "Show project:"
+granary show "$PROJECT1_ID"
+
+echo ""
+echo "Show task:"
+granary show "$TASK1_ID"
+
+echo ""
+echo "Show session:"
+granary show "$SESSION_ID"
+
+echo ""
+echo "Show checkpoint:"
+granary show "$CHECKPOINT_ID"
+
+echo ""
+echo "Show comment:"
+granary show "$COMMENT1_ID"
+
+echo ""
+echo "Show artifact:"
+granary show "$ARTIFACT1_ID"
+
+echo "All 'granary show' tests passed."
+
+# =============================================================================
+# 19. Block and unblock
+# =============================================================================
+echo ""
+echo "=== 19. Block and Unblock Tasks ==="
 granary task "$TASK2_ID" block --reason "Waiting for security review"
 echo "Task blocked."
 
@@ -202,10 +243,10 @@ granary task "$TASK2_ID" unblock
 echo "Task unblocked."
 
 # =============================================================================
-# 19. Create subtasks
+# 20. Create subtasks
 # =============================================================================
 echo ""
-echo "=== 19. Create Subtasks ==="
+echo "=== 20. Create Subtasks ==="
 granary task "$TASK2_ID" tasks create "Implement login endpoint" --priority P0
 granary task "$TASK2_ID" tasks create "Implement logout endpoint" --priority P1
 echo "Subtasks created."
@@ -215,28 +256,28 @@ echo "List subtasks:"
 granary task "$TASK2_ID" tasks
 
 # =============================================================================
-# 20. Configuration
+# 21. Configuration
 # =============================================================================
 echo ""
-echo "=== 20. Configuration ==="
+echo "=== 21. Configuration ==="
 granary config set default_owner "Claude"
 granary config set default_priority "P2"
 granary config list
 
 # =============================================================================
-# 21. Steering files
+# 22. Steering files
 # =============================================================================
 echo ""
-echo "=== 21. Steering Files ==="
+echo "=== 22. Steering Files ==="
 granary steering add "CLAUDE.md" --mode always
 granary steering add "docs/guidelines.md" --mode on-demand
 granary steering list
 
 # =============================================================================
-# 22. Different output formats
+# 23. Different output formats
 # =============================================================================
 echo ""
-echo "=== 22. Output Formats ==="
+echo "=== 23. Output Formats ==="
 
 echo "JSON format:"
 granary tasks --all --json | head -20
@@ -250,15 +291,15 @@ echo "Markdown format:"
 granary tasks --all --format md
 
 # =============================================================================
-# 23. Update and archive
+# 24. Update and archive
 # =============================================================================
 echo ""
-echo "=== 23. Update Project ==="
+echo "=== 24. Update Project ==="
 granary project "$PROJECT1_ID" update --description "REST API with GraphQL support"
 echo "Project updated."
 
 echo ""
-echo "=== 24. Archive Project ==="
+echo "=== 25. Archive Project ==="
 granary project "$PROJECT2_ID" archive
 echo "Project archived."
 
@@ -267,17 +308,17 @@ echo "List projects (including archived):"
 granary projects --all
 
 # =============================================================================
-# 24. Handoff generation
+# 26. Handoff generation
 # =============================================================================
 echo ""
-echo "=== 25. Generate Handoff ==="
+echo "=== 26. Generate Handoff ==="
 granary handoff --to "Review Agent" --tasks "$TASK2_ID,$TASK3_ID" --constraints "Focus on security" --acceptance-criteria "All tests pass"
 
 # =============================================================================
-# 25. Close session
+# 27. Close session
 # =============================================================================
 echo ""
-echo "=== 26. Close Session ==="
+echo "=== 27. Close Session ==="
 granary session close --summary "Completed database schema, auth in progress"
 echo "Session closed."
 
@@ -286,10 +327,10 @@ echo "List all sessions:"
 granary sessions --all
 
 # =============================================================================
-# 26. Verify final state
+# 28. Verify final state
 # =============================================================================
 echo ""
-echo "=== 27. Final State ==="
+echo "=== 28. Final State ==="
 echo "Projects:"
 granary projects --all
 
