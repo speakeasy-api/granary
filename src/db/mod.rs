@@ -853,14 +853,16 @@ pub mod steering {
 
         Ok(rows
             .into_iter()
-            .map(|(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
-                id,
-                path,
-                mode,
-                scope_type,
-                scope_id,
-                created_at,
-            })
+            .map(
+                |(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
+                    id,
+                    path,
+                    mode,
+                    scope_type,
+                    scope_id,
+                    created_at,
+                },
+            )
             .collect())
     }
 
@@ -874,14 +876,16 @@ pub mod steering {
 
         Ok(rows
             .into_iter()
-            .map(|(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
-                id,
-                path,
-                mode,
-                scope_type,
-                scope_id,
-                created_at,
-            })
+            .map(
+                |(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
+                    id,
+                    path,
+                    mode,
+                    scope_type,
+                    scope_id,
+                    created_at,
+                },
+            )
             .collect())
     }
 
@@ -901,14 +905,16 @@ pub mod steering {
 
         Ok(rows
             .into_iter()
-            .map(|(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
-                id,
-                path,
-                mode,
-                scope_type,
-                scope_id,
-                created_at,
-            })
+            .map(
+                |(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
+                    id,
+                    path,
+                    mode,
+                    scope_type,
+                    scope_id,
+                    created_at,
+                },
+            )
             .collect())
     }
 
@@ -923,26 +929,29 @@ pub mod steering {
         }
 
         let json_ids = serde_json::to_string(scope_ids)?;
-        let rows = sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, String)>(
-            "SELECT id, path, mode, scope_type, scope_id, created_at FROM steering
+        let rows =
+            sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, String)>(
+                "SELECT id, path, mode, scope_type, scope_id, created_at FROM steering
              WHERE scope_type = ? AND scope_id IN (SELECT value FROM json_each(?))
              ORDER BY path",
-        )
-        .bind(scope_type)
-        .bind(json_ids)
-        .fetch_all(pool)
-        .await?;
+            )
+            .bind(scope_type)
+            .bind(json_ids)
+            .fetch_all(pool)
+            .await?;
 
         Ok(rows
             .into_iter()
-            .map(|(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
-                id,
-                path,
-                mode,
-                scope_type,
-                scope_id,
-                created_at,
-            })
+            .map(
+                |(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
+                    id,
+                    path,
+                    mode,
+                    scope_type,
+                    scope_id,
+                    created_at,
+                },
+            )
             .collect())
     }
 
@@ -986,12 +995,14 @@ pub mod steering {
                     .await?
             }
             (Some(st), Some(sid)) => {
-                sqlx::query("DELETE FROM steering WHERE path = ? AND scope_type = ? AND scope_id = ?")
-                    .bind(path)
-                    .bind(st)
-                    .bind(sid)
-                    .execute(pool)
-                    .await?
+                sqlx::query(
+                    "DELETE FROM steering WHERE path = ? AND scope_type = ? AND scope_id = ?",
+                )
+                .bind(path)
+                .bind(st)
+                .bind(sid)
+                .execute(pool)
+                .await?
             }
             _ => return Ok(false),
         };
@@ -1000,10 +1011,11 @@ pub mod steering {
 
     /// Delete all steering files attached to a session (for cleanup on session close)
     pub async fn delete_by_session(pool: &SqlitePool, session_id: &str) -> Result<u64> {
-        let result = sqlx::query("DELETE FROM steering WHERE scope_type = 'session' AND scope_id = ?")
-            .bind(session_id)
-            .execute(pool)
-            .await?;
+        let result =
+            sqlx::query("DELETE FROM steering WHERE scope_type = 'session' AND scope_id = ?")
+                .bind(session_id)
+                .execute(pool)
+                .await?;
         Ok(result.rows_affected())
     }
 }

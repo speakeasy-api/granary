@@ -74,28 +74,22 @@ pub async fn steering(action: SteeringAction, _format: OutputFormat) -> Result<(
             for_session,
         } => {
             // Determine scope
-            let (scope_type, scope_id): (Option<&str>, Option<String>) = if let Some(ref proj_id) = project {
-                (Some("project"), Some(proj_id.clone()))
-            } else if let Some(ref task_id) = task {
-                (Some("task"), Some(task_id.clone()))
-            } else if for_session {
-                // Get current session ID
-                let session_id = workspace
-                    .current_session_id()
-                    .ok_or_else(|| crate::error::GranaryError::NoActiveSession)?;
-                (Some("session"), Some(session_id))
-            } else {
-                (None, None)
-            };
+            let (scope_type, scope_id): (Option<&str>, Option<String>) =
+                if let Some(ref proj_id) = project {
+                    (Some("project"), Some(proj_id.clone()))
+                } else if let Some(ref task_id) = task {
+                    (Some("task"), Some(task_id.clone()))
+                } else if for_session {
+                    // Get current session ID
+                    let session_id = workspace
+                        .current_session_id()
+                        .ok_or_else(|| crate::error::GranaryError::NoActiveSession)?;
+                    (Some("session"), Some(session_id))
+                } else {
+                    (None, None)
+                };
 
-            db::steering::add(
-                &pool,
-                &path,
-                &mode,
-                scope_type,
-                scope_id.as_deref(),
-            )
-            .await?;
+            db::steering::add(&pool, &path, &mode, scope_type, scope_id.as_deref()).await?;
 
             let scope_display = match (scope_type, &scope_id) {
                 (None, _) => "global".to_string(),
@@ -112,27 +106,23 @@ pub async fn steering(action: SteeringAction, _format: OutputFormat) -> Result<(
             for_session,
         } => {
             // Determine scope
-            let (scope_type, scope_id): (Option<&str>, Option<String>) = if let Some(ref proj_id) = project {
-                (Some("project"), Some(proj_id.clone()))
-            } else if let Some(ref task_id) = task {
-                (Some("task"), Some(task_id.clone()))
-            } else if for_session {
-                // Get current session ID
-                let session_id = workspace
-                    .current_session_id()
-                    .ok_or_else(|| crate::error::GranaryError::NoActiveSession)?;
-                (Some("session"), Some(session_id))
-            } else {
-                (None, None)
-            };
+            let (scope_type, scope_id): (Option<&str>, Option<String>) =
+                if let Some(ref proj_id) = project {
+                    (Some("project"), Some(proj_id.clone()))
+                } else if let Some(ref task_id) = task {
+                    (Some("task"), Some(task_id.clone()))
+                } else if for_session {
+                    // Get current session ID
+                    let session_id = workspace
+                        .current_session_id()
+                        .ok_or_else(|| crate::error::GranaryError::NoActiveSession)?;
+                    (Some("session"), Some(session_id))
+                } else {
+                    (None, None)
+                };
 
-            let removed = db::steering::remove(
-                &pool,
-                &path,
-                scope_type,
-                scope_id.as_deref(),
-            )
-            .await?;
+            let removed =
+                db::steering::remove(&pool, &path, scope_type, scope_id.as_deref()).await?;
 
             if removed {
                 let scope_display = match (scope_type, &scope_id) {
