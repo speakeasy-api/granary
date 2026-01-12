@@ -7,6 +7,7 @@
   },
   "license": "MIT",
   "repository": "https://github.com/danielkov/granary",
-  "skills": "./skills/",
-  "commands": "./commands/"
+  "homepage": "https://github.com/danielkov/granary",
+  "keywords": ["context", "workflow", "agents", "tasks", "sessions"],
+  "categories": ["productivity", "development"]
 }
