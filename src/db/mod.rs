@@ -818,6 +818,196 @@ pub mod counters {
     }
 }
 
+/// Database operations for steering files
+pub mod steering {
+    use super::*;
+
+    #[derive(Debug, Clone, serde::Serialize)]
+    pub struct SteeringFile {
+        pub id: i64,
+        pub path: String,
+        pub mode: String,
+        pub scope_type: Option<String>,
+        pub scope_id: Option<String>,
+        pub created_at: String,
+    }
+
+    impl SteeringFile {
+        /// Format the scope for display
+        pub fn scope_display(&self) -> String {
+            match (&self.scope_type, &self.scope_id) {
+                (None, _) => "global".to_string(),
+                (Some(t), Some(id)) => format!("{}: {}", t, id),
+                (Some(t), None) => t.clone(),
+            }
+        }
+    }
+
+    /// List all steering files
+    pub async fn list(pool: &SqlitePool) -> Result<Vec<SteeringFile>> {
+        let rows = sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, String)>(
+            "SELECT id, path, mode, scope_type, scope_id, created_at FROM steering ORDER BY scope_type NULLS FIRST, path",
+        )
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
+                id,
+                path,
+                mode,
+                scope_type,
+                scope_id,
+                created_at,
+            })
+            .collect())
+    }
+
+    /// List global (unscoped) steering files
+    pub async fn list_global(pool: &SqlitePool) -> Result<Vec<SteeringFile>> {
+        let rows = sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, String)>(
+            "SELECT id, path, mode, scope_type, scope_id, created_at FROM steering WHERE scope_type IS NULL ORDER BY path",
+        )
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
+                id,
+                path,
+                mode,
+                scope_type,
+                scope_id,
+                created_at,
+            })
+            .collect())
+    }
+
+    /// List steering files attached to a specific scope
+    pub async fn list_by_scope(
+        pool: &SqlitePool,
+        scope_type: &str,
+        scope_id: &str,
+    ) -> Result<Vec<SteeringFile>> {
+        let rows = sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, String)>(
+            "SELECT id, path, mode, scope_type, scope_id, created_at FROM steering WHERE scope_type = ? AND scope_id = ? ORDER BY path",
+        )
+        .bind(scope_type)
+        .bind(scope_id)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
+                id,
+                path,
+                mode,
+                scope_type,
+                scope_id,
+                created_at,
+            })
+            .collect())
+    }
+
+    /// List steering files for multiple scopes (e.g., all projects in session)
+    pub async fn list_by_scope_ids(
+        pool: &SqlitePool,
+        scope_type: &str,
+        scope_ids: &[String],
+    ) -> Result<Vec<SteeringFile>> {
+        if scope_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let json_ids = serde_json::to_string(scope_ids)?;
+        let rows = sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, String)>(
+            "SELECT id, path, mode, scope_type, scope_id, created_at FROM steering
+             WHERE scope_type = ? AND scope_id IN (SELECT value FROM json_each(?))
+             ORDER BY path",
+        )
+        .bind(scope_type)
+        .bind(json_ids)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, path, mode, scope_type, scope_id, created_at)| SteeringFile {
+                id,
+                path,
+                mode,
+                scope_type,
+                scope_id,
+                created_at,
+            })
+            .collect())
+    }
+
+    /// Add a steering file
+    pub async fn add(
+        pool: &SqlitePool,
+        path: &str,
+        mode: &str,
+        scope_type: Option<&str>,
+        scope_id: Option<&str>,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO steering (path, mode, scope_type, scope_id, created_at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(path, scope_type, scope_id) DO UPDATE SET mode = ?",
+        )
+        .bind(path)
+        .bind(mode)
+        .bind(scope_type)
+        .bind(scope_id)
+        .bind(&now)
+        .bind(mode)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Remove a steering file by path and scope
+    pub async fn remove(
+        pool: &SqlitePool,
+        path: &str,
+        scope_type: Option<&str>,
+        scope_id: Option<&str>,
+    ) -> Result<bool> {
+        let result = match (scope_type, scope_id) {
+            (None, _) => {
+                sqlx::query("DELETE FROM steering WHERE path = ? AND scope_type IS NULL")
+                    .bind(path)
+                    .execute(pool)
+                    .await?
+            }
+            (Some(st), Some(sid)) => {
+                sqlx::query("DELETE FROM steering WHERE path = ? AND scope_type = ? AND scope_id = ?")
+                    .bind(path)
+                    .bind(st)
+                    .bind(sid)
+                    .execute(pool)
+                    .await?
+            }
+            _ => return Ok(false),
+        };
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Delete all steering files attached to a session (for cleanup on session close)
+    pub async fn delete_by_session(pool: &SqlitePool, session_id: &str) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM steering WHERE scope_type = 'session' AND scope_id = ?")
+            .bind(session_id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+}
+
 /// Database operations for config
 pub mod config {
     use super::*;

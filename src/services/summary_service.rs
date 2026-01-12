@@ -5,7 +5,7 @@ use crate::error::Result;
 use crate::models::*;
 use crate::output::json::{
     BlockerInfo, ContextOutput, HandoffOutput, PriorityCounts, SessionSummary, StateSummary,
-    StatusCounts, SummaryOutput,
+    StatusCounts, SteeringInfo, SummaryOutput,
 };
 use crate::services::{Workspace, get_current_session, get_scope_by_type, get_task};
 
@@ -267,6 +267,25 @@ pub async fn generate_context(
         Vec::new()
     };
 
+    // Get steering files based on scope:
+    // - Global steering (always included)
+    // - Project-attached steering (for projects in session scope)
+    // - Session-attached steering (for current session)
+    let project_ids_for_steering = if let Some(ref session) = current_session {
+        get_scope_by_type(pool, &session.id, ScopeItemType::Project).await?
+    } else {
+        Vec::new()
+    };
+    let session_id_for_steering = current_session.as_ref().map(|s| s.id.clone());
+
+    let steering = fetch_steering_for_context(
+        pool,
+        workspace,
+        &project_ids_for_steering,
+        session_id_for_steering.as_deref(),
+    )
+    .await?;
+
     let session_summary = current_session.map(|s| SessionSummary {
         id: s.id,
         name: s.name,
@@ -283,6 +302,7 @@ pub async fn generate_context(
         decisions,
         blockers,
         artifacts,
+        steering,
     })
 }
 
@@ -295,6 +315,7 @@ pub async fn generate_handoff(
     acceptance_criteria: Option<&str>,
     output_schema: Option<serde_json::Value>,
 ) -> Result<HandoffOutput> {
+    let workspace = Workspace::find()?;
     let mut tasks = Vec::new();
     let mut context = Vec::new();
 
@@ -312,6 +333,11 @@ pub async fn generate_handoff(
     context.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     context.truncate(20);
 
+    // Get steering files for handoff:
+    // - Global steering (always included)
+    // - Task-attached steering (for the specific tasks being handed off)
+    let steering = fetch_steering_for_handoff(pool, &workspace, task_ids).await?;
+
     Ok(HandoffOutput {
         to: to.to_string(),
         tasks,
@@ -319,5 +345,92 @@ pub async fn generate_handoff(
         constraints: constraints.map(|s| s.to_string()),
         acceptance_criteria: acceptance_criteria.map(|s| s.to_string()),
         output_schema,
+        steering,
     })
+}
+
+/// Fetch steering files for context generation
+/// Includes: global, project-attached (for projects in scope), session-attached (for current session)
+async fn fetch_steering_for_context(
+    pool: &SqlitePool,
+    workspace: &Workspace,
+    project_ids: &[String],
+    session_id: Option<&str>,
+) -> Result<Vec<SteeringInfo>> {
+    let mut all_files = Vec::new();
+
+    // 1. Get global (unscoped) steering files
+    let global_files = db::steering::list_global(pool).await?;
+    all_files.extend(global_files);
+
+    // 2. Get project-attached steering files
+    if !project_ids.is_empty() {
+        let project_files = db::steering::list_by_scope_ids(pool, "project", project_ids).await?;
+        all_files.extend(project_files);
+    }
+
+    // 3. Get session-attached steering files
+    if let Some(sid) = session_id {
+        let session_files = db::steering::list_by_scope(pool, "session", sid).await?;
+        all_files.extend(session_files);
+    }
+
+    // Convert to SteeringInfo with content
+    convert_to_steering_info(workspace, all_files)
+}
+
+/// Fetch steering files for handoff generation
+/// Includes: global, task-attached (for the specific tasks being handed off)
+async fn fetch_steering_for_handoff(
+    pool: &SqlitePool,
+    workspace: &Workspace,
+    task_ids: &[String],
+) -> Result<Vec<SteeringInfo>> {
+    let mut all_files = Vec::new();
+
+    // 1. Get global (unscoped) steering files
+    let global_files = db::steering::list_global(pool).await?;
+    all_files.extend(global_files);
+
+    // 2. Get task-attached steering files
+    if !task_ids.is_empty() {
+        let task_files = db::steering::list_by_scope_ids(pool, "task", task_ids).await?;
+        all_files.extend(task_files);
+    }
+
+    // Convert to SteeringInfo with content
+    convert_to_steering_info(workspace, all_files)
+}
+
+/// Convert SteeringFile records to SteeringInfo with file contents
+fn convert_to_steering_info(
+    workspace: &Workspace,
+    files: Vec<db::steering::SteeringFile>,
+) -> Result<Vec<SteeringInfo>> {
+    let mut result = Vec::new();
+
+    for file in files {
+        // Resolve file path
+        let resolved_path = if file.path.starts_with('/') || file.path.starts_with("http") {
+            file.path.clone()
+        } else {
+            // Resolve relative paths against workspace root
+            workspace.root.join(&file.path).display().to_string()
+        };
+
+        // Try to read file content
+        let content = if !resolved_path.starts_with("http") {
+            std::fs::read_to_string(&resolved_path).ok()
+        } else {
+            None
+        };
+
+        result.push(SteeringInfo {
+            path: file.path,
+            mode: file.mode,
+            content,
+        });
+    }
+
+    Ok(result)
 }

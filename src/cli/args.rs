@@ -644,13 +644,37 @@ pub enum SteeringAction {
         path: String,
 
         /// Mode (always, on-demand)
-        #[arg(long, default_value = "on-demand")]
+        #[arg(long, default_value = "always")]
         mode: String,
+
+        /// Attach to a project (only included when project is in context)
+        #[arg(long, conflicts_with_all = ["task", "for_session"])]
+        project: Option<String>,
+
+        /// Attach to a task (only included in handoffs for that task)
+        #[arg(long, conflicts_with_all = ["project", "for_session"])]
+        task: Option<String>,
+
+        /// Attach to current session (auto-deleted on session close)
+        #[arg(long = "for-session", conflicts_with_all = ["project", "task"])]
+        for_session: bool,
     },
 
     /// Remove a steering file
     Rm {
         /// File path
         path: String,
+
+        /// Remove from a specific project
+        #[arg(long, conflicts_with_all = ["task", "for_session"])]
+        project: Option<String>,
+
+        /// Remove from a specific task
+        #[arg(long, conflicts_with_all = ["project", "for_session"])]
+        task: Option<String>,
+
+        /// Remove from current session
+        #[arg(long = "for-session", conflicts_with_all = ["project", "task"])]
+        for_session: bool,
     },
 }

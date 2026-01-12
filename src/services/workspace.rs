@@ -115,7 +115,10 @@ impl Workspace {
         if !self.db_path.exists() {
             return Err(GranaryError::WorkspaceNotFound);
         }
-        create_pool(&self.db_path).await
+        let pool = create_pool(&self.db_path).await?;
+        // Run migrations to ensure schema is up to date
+        run_migrations(&pool).await?;
+        Ok(pool)
     }
 
     /// Get the current session ID from file or environment

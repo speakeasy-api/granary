@@ -54,46 +54,93 @@ pub async fn steering(action: SteeringAction, _format: OutputFormat) -> Result<(
 
     match action {
         SteeringAction::List => {
-            let rows = sqlx::query_as::<_, (i64, String, String, String)>(
-                "SELECT id, path, mode, created_at FROM steering ORDER BY path",
-            )
-            .fetch_all(&pool)
-            .await?;
+            let files = db::steering::list(&pool).await?;
 
-            if rows.is_empty() {
+            if files.is_empty() {
                 println!("No steering files configured");
             } else {
                 println!("Steering files:");
-                for (_, path, mode, _) in rows {
-                    println!("  {} [{}]", path, mode);
+                for file in files {
+                    println!("  {} [{}]", file.path, file.scope_display());
                 }
             }
         }
 
-        SteeringAction::Add { path, mode } => {
-            let now = chrono::Utc::now().to_rfc3339();
-            sqlx::query(
-                "INSERT INTO steering (path, mode, created_at) VALUES (?, ?, ?)
-                 ON CONFLICT(path) DO UPDATE SET mode = ?",
+        SteeringAction::Add {
+            path,
+            mode,
+            project,
+            task,
+            for_session,
+        } => {
+            // Determine scope
+            let (scope_type, scope_id): (Option<&str>, Option<String>) = if let Some(ref proj_id) = project {
+                (Some("project"), Some(proj_id.clone()))
+            } else if let Some(ref task_id) = task {
+                (Some("task"), Some(task_id.clone()))
+            } else if for_session {
+                // Get current session ID
+                let session_id = workspace
+                    .current_session_id()
+                    .ok_or_else(|| crate::error::GranaryError::NoActiveSession)?;
+                (Some("session"), Some(session_id))
+            } else {
+                (None, None)
+            };
+
+            db::steering::add(
+                &pool,
+                &path,
+                &mode,
+                scope_type,
+                scope_id.as_deref(),
             )
-            .bind(&path)
-            .bind(&mode)
-            .bind(&now)
-            .bind(&mode)
-            .execute(&pool)
             .await?;
 
-            println!("Added steering file: {} [{}]", path, mode);
+            let scope_display = match (scope_type, &scope_id) {
+                (None, _) => "global".to_string(),
+                (Some(t), Some(id)) => format!("{}: {}", t, id),
+                _ => "unknown".to_string(),
+            };
+            println!("Added steering file: {} [{}]", path, scope_display);
         }
 
-        SteeringAction::Rm { path } => {
-            let result = sqlx::query("DELETE FROM steering WHERE path = ?")
-                .bind(&path)
-                .execute(&pool)
-                .await?;
+        SteeringAction::Rm {
+            path,
+            project,
+            task,
+            for_session,
+        } => {
+            // Determine scope
+            let (scope_type, scope_id): (Option<&str>, Option<String>) = if let Some(ref proj_id) = project {
+                (Some("project"), Some(proj_id.clone()))
+            } else if let Some(ref task_id) = task {
+                (Some("task"), Some(task_id.clone()))
+            } else if for_session {
+                // Get current session ID
+                let session_id = workspace
+                    .current_session_id()
+                    .ok_or_else(|| crate::error::GranaryError::NoActiveSession)?;
+                (Some("session"), Some(session_id))
+            } else {
+                (None, None)
+            };
 
-            if result.rows_affected() > 0 {
-                println!("Removed steering file: {}", path);
+            let removed = db::steering::remove(
+                &pool,
+                &path,
+                scope_type,
+                scope_id.as_deref(),
+            )
+            .await?;
+
+            if removed {
+                let scope_display = match (scope_type, &scope_id) {
+                    (None, _) => "global".to_string(),
+                    (Some(t), Some(id)) => format!("{}: {}", t, id),
+                    _ => "unknown".to_string(),
+                };
+                println!("Removed steering file: {} [{}]", path, scope_display);
             } else {
                 println!("Steering file not found: {}", path);
             }

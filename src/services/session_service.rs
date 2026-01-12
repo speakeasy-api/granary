@@ -117,6 +117,12 @@ pub async fn close_session(
 
     db::sessions::close(pool, id).await?;
 
+    // Clean up session-attached steering files
+    let deleted_steering = db::steering::delete_by_session(pool, id).await?;
+    if deleted_steering > 0 {
+        // Steering cleanup is silent - no event logged as it's automatic cleanup
+    }
+
     // Add summary as a comment if provided
     if let Some(content) = summary {
         let scope = format!("session:{}:comment", id);

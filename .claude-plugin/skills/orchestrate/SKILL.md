@@ -117,7 +117,105 @@ granary checkpoint create "before-major-refactor"
 granary checkpoint restore before-major-refactor
 ```
 
-## 7. Close Session When Done
+## 7. Steering for Sub-Agents
+
+Steering files provide standards, conventions, and context that sub-agents should follow. Steering can be scoped to prevent context pollution:
+
+| Scope | When Included | Use Case |
+|-------|---------------|----------|
+| Global (default) | Always in context/handoffs | Project-wide standards |
+| `--project <id>` | When project is in session scope | Project-specific patterns |
+| `--task <id>` | When handing off that specific task | Task-specific research |
+| `--for-session` | During session, auto-deleted on close | Temporary research notes |
+
+### Adding Steering Files
+
+```bash
+# Global steering (always included)
+granary steering add docs/coding-standards.md
+
+# Project-attached (only when this project is in context)
+granary steering add docs/auth-patterns.md --project auth-proj-abc1
+
+# Task-attached (only in handoffs for this specific task)
+granary steering add .granary/task-research.md --task auth-proj-abc1-task-3
+
+# Session-attached (temporary, auto-deleted when session closes)
+granary steering add .granary/temp-notes.md --for-session
+
+# List current steering files
+granary steering list
+# Output:
+# docs/coding-standards.md [global]
+# docs/auth-patterns.md [project: auth-proj-abc1]
+# .granary/task-research.md [task: auth-proj-abc1-task-3]
+# .granary/temp-notes.md [session: sess-xxx]
+
+# Remove steering (specify scope to match)
+granary steering rm docs/auth-patterns.md --project auth-proj-abc1
+```
+
+### Use Case: Research Before Delegating
+
+Before spawning sub-agents, orchestrators can research the codebase and add findings as session-scoped steering (auto-cleaned on session close):
+
+```bash
+# 1. Do research (as orchestrator)
+#    - Explore codebase structure
+#    - Identify patterns and conventions
+#    - Note relevant files and dependencies
+
+# 2. Write findings to a file
+cat > .granary/research-notes.md << 'EOF'
+# Research Notes: Authentication Implementation
+
+## Existing Patterns
+- Auth middleware in src/middleware/auth.rs uses JWT tokens
+- User model in src/models/user.rs with bcrypt password hashing
+- Session storage uses Redis (see src/services/session.rs)
+
+## Key Conventions
+- All API endpoints return JSON with {data, error, meta} structure
+- Use `ApiError` type for error handling
+- Tests go in tests/ directory, not inline
+EOF
+
+# 3. Add as session-scoped steering (auto-deleted on session close)
+granary steering add .granary/research-notes.md --for-session
+
+# 4. Now when you spawn sub-agents, they receive this context
+granary context --format prompt  # Includes the research notes
+# When session closes, research-notes.md steering is automatically removed!
+```
+
+### Task-Specific Steering for Handoffs
+
+When you need steering only for a specific task handoff:
+
+```bash
+# Research specific to one task
+cat > .granary/task-3-notes.md << 'EOF'
+# Task-Specific Notes
+- This endpoint needs rate limiting
+- See existing rate limiter in src/middleware/rate_limit.rs
+EOF
+
+# Attach to the specific task
+granary steering add .granary/task-3-notes.md --task auth-proj-abc1-task-3
+
+# Only included when handing off that task
+granary handoff --to "Agent" --tasks auth-proj-abc1-task-3  # Includes notes
+granary handoff --to "Agent" --tasks auth-proj-abc1-task-4  # Does NOT include
+```
+
+### When to Use Each Scope
+
+- **Global**: Project-wide coding standards, architecture decisions
+- **Project-attached**: Module-specific patterns (e.g., auth module conventions)
+- **Task-attached**: Research specific to one task (avoid polluting other handoffs)
+- **Session-attached**: Temporary research that shouldn't persist after the work is done
+
+## 8. Close Session When Done
 
 ```bash
 granary session close --summary "Completed feature implementation"
@@ -130,6 +228,17 @@ granary session close --summary "Completed feature implementation"
 granary session start "auth-feature" --owner "Orchestrator" --mode execute
 granary session add auth-proj-abc1
 
+# Research phase: explore codebase and document findings
+# ... do research ...
+
+# Write research as session-scoped steering (auto-cleaned on close)
+cat > .granary/auth-research.md << 'EOF'
+# Auth Implementation Notes
+- Use existing JWT middleware pattern
+- Follow error handling in src/error.rs
+EOF
+granary steering add .granary/auth-research.md --for-session
+
 # Process tasks
 while TASK=$(granary next --json) && [ "$(echo $TASK | jq -r '.task')" != "null" ]; do
   TASK_ID=$(echo $TASK | jq -r '.task.id')
@@ -138,13 +247,16 @@ while TASK=$(granary next --json) && [ "$(echo $TASK | jq -r '.task')" != "null"
   echo "Processing: $TITLE"
   granary task $TASK_ID start --owner "Orchestrator"
 
-  # Spawn sub-agent (implementation depends on your setup)
-  # Pass: TASK_ID, task description, relevant context
+  # Generate handoff (includes global + session steering automatically)
+  granary handoff --to "Worker" --tasks $TASK_ID
+
+  # Spawn sub-agent with handoff context
+  # ... your agent spawning logic here ...
 
   # Wait for completion, then:
   granary task $TASK_ID done
 done
 
-# Cleanup
+# Cleanup - session steering is automatically removed on close!
 granary session close --summary "Auth feature complete"
 ```

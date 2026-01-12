@@ -115,6 +115,14 @@ pub fn format_summary(summary: &SummaryOutput) -> String {
     serde_json::to_string_pretty(summary).unwrap_or_else(|_| "{}".to_string())
 }
 
+/// Steering file information for context packs
+#[derive(Serialize)]
+pub struct SteeringInfo {
+    pub path: String,
+    pub mode: String,
+    pub content: Option<String>,
+}
+
 /// Format a context pack as JSON
 #[derive(Serialize)]
 pub struct ContextOutput {
@@ -125,6 +133,7 @@ pub struct ContextOutput {
     pub artifacts: Vec<Artifact>,
     pub decisions: Vec<Comment>,
     pub blockers: Vec<BlockerInfo>,
+    pub steering: Vec<SteeringInfo>,
 }
 
 #[derive(Serialize)]
@@ -148,6 +157,7 @@ pub struct HandoffOutput {
     pub constraints: Option<String>,
     pub acceptance_criteria: Option<String>,
     pub output_schema: Option<serde_json::Value>,
+    pub steering: Vec<SteeringInfo>,
 }
 
 pub fn format_handoff(handoff: &HandoffOutput) -> String {

@@ -430,7 +430,31 @@ pub fn format_context(context: &ContextOutput) -> String {
                 artifact.artifact_type, artifact.path_or_url
             ));
         }
-        output.push_str("</artifacts>\n");
+        output.push_str("</artifacts>\n\n");
+    }
+
+    // Steering files
+    if !context.steering.is_empty() {
+        output.push_str(&format!(
+            "<steering count=\"{}\">\n",
+            context.steering.len()
+        ));
+        for steering in &context.steering {
+            output.push_str(&format!(
+                "<steering_file path=\"{}\" mode=\"{}\">\n",
+                steering.path, steering.mode
+            ));
+            if let Some(content) = &steering.content {
+                output.push_str(content);
+                if !content.ends_with('\n') {
+                    output.push('\n');
+                }
+            } else {
+                output.push_str("(content not available - external reference)\n");
+            }
+            output.push_str("</steering_file>\n");
+        }
+        output.push_str("</steering>\n");
     }
 
     output.push_str("</context_pack>\n");
@@ -488,12 +512,35 @@ pub fn format_handoff(handoff: &HandoffOutput) -> String {
         output.push_str("\n</output_schema>\n\n");
     }
 
+    // Steering files for the delegated agent
+    if !handoff.steering.is_empty() {
+        output.push_str(&format!(
+            "<steering count=\"{}\">\n",
+            handoff.steering.len()
+        ));
+        output.push_str("The following standards and conventions must be followed:\n\n");
+        for steering in &handoff.steering {
+            output.push_str(&format!("<steering_file path=\"{}\">\n", steering.path));
+            if let Some(content) = &steering.content {
+                output.push_str(content);
+                if !content.ends_with('\n') {
+                    output.push('\n');
+                }
+            } else {
+                output.push_str("(reference to external document)\n");
+            }
+            output.push_str("</steering_file>\n");
+        }
+        output.push_str("</steering>\n\n");
+    }
+
     output.push_str("<instructions>\n");
     output.push_str("1. Complete the assigned task(s) according to the context provided.\n");
     output.push_str("2. Follow any constraints specified.\n");
-    output.push_str("3. Ensure acceptance criteria are met.\n");
-    output.push_str("4. Report findings using the output schema if provided.\n");
-    output.push_str("5. Update task status upon completion.\n");
+    output.push_str("3. Follow the steering documents for coding standards and conventions.\n");
+    output.push_str("4. Ensure acceptance criteria are met.\n");
+    output.push_str("5. Report findings using the output schema if provided.\n");
+    output.push_str("6. Update task status upon completion.\n");
     output.push_str("</instructions>\n");
 
     output.push_str("</handoff>\n");
