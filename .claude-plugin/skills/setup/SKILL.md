@@ -19,10 +19,10 @@ If not installed, direct the user to install it:
 
 ```bash
 # macOS/Linux
-curl -fsSL https://raw.githubusercontent.com/anthropics/granary/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/danielkov/granary/main/install.sh | sh
 
 # Windows PowerShell
-irm https://raw.githubusercontent.com/anthropics/granary/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/danielkov/granary/main/install.ps1 | iex
 ```
 
 ## 2. Initialize Workspace
@@ -46,6 +46,7 @@ granary doctor
 ## Done
 
 Granary is now ready. The user can:
+
 - Create projects with `granary projects create "Project Name" --description "..."`
 - Create tasks with `granary project <id> tasks create "Task title" --description "..."`
 - Start sessions with `granary session start "session-name"`
