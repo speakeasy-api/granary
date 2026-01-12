@@ -1,13 +1,18 @@
 {
-  "name": "granary",
-  "description": "Context hub for agentic workflows - manage projects, tasks, sessions, and multi-agent coordination",
-  "version": "0.1.0",
-  "author": {
-    "name": "Daniel Kovacs <kovacsemod@gmail.com>"
+  "owner": {
+    "name": "Daniel Kovacs",
+    "email": "kovacsemod@gmail.com"
   },
-  "license": "MIT",
-  "repository": "https://github.com/danielkov/granary",
-  "homepage": "https://github.com/danielkov/granary",
-  "keywords": ["context", "workflow", "agents", "tasks", "sessions"],
-  "categories": ["productivity", "development"]
+  "plugins": [
+    {
+      "name": "granary",
+      "description": "Context hub for agentic workflows - manage projects, tasks, sessions, and multi-agent coordination",
+      "version": "0.1.0",
+      "license": "MIT",
+      "repository": "https://github.com/danielkov/granary",
+      "homepage": "https://github.com/danielkov/granary",
+      "keywords": ["context", "workflow", "agents", "tasks", "sessions"],
+      "categories": ["productivity", "development"]
+    }
+  ]
 }
