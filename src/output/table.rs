@@ -370,10 +370,7 @@ impl From<&SearchResult> for SearchResultRow {
     fn from(result: &SearchResult) -> Self {
         match result {
             SearchResult::Project {
-                id,
-                name,
-                status,
-                ..
+                id, name, status, ..
             } => Self {
                 entity_type: "project".to_string(),
                 id: id.clone(),

@@ -2,7 +2,9 @@ use clap::Parser;
 use std::process::ExitCode;
 
 use granary::cli::args::{Cli, Commands};
-use granary::cli::{batch, checkpoints, config, init, projects, search, sessions, show, summary, tasks};
+use granary::cli::{
+    batch, checkpoints, config, init, projects, search, sessions, show, summary, tasks,
+};
 use granary::error::{GranaryError, exit_codes};
 
 #[tokio::main]
@@ -64,7 +66,10 @@ async fn run(cli: Cli) -> granary::Result<()> {
             tasks::task(&id, action, format).await?;
         }
 
-        Commands::Next { include_reason, all } => {
+        Commands::Next {
+            include_reason,
+            all,
+        } => {
             tasks::next_task(include_reason, all, format).await?;
         }
 

@@ -351,9 +351,7 @@ pub mod tasks {
                 .fetch_all(pool)
                 .await?
         } else {
-            sqlx::query_as::<_, Task>(&query)
-                .fetch_all(pool)
-                .await?
+            sqlx::query_as::<_, Task>(&query).fetch_all(pool).await?
         };
 
         Ok(tasks)

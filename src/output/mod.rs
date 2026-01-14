@@ -403,10 +403,7 @@ fn md_format_search_results(results: &[SearchResult]) -> String {
                 priority,
                 project_id,
             } => {
-                md.push_str(&format!(
-                    "- **[TASK]** {} (`{}`) [{}]",
-                    title, id, priority
-                ));
+                md.push_str(&format!("- **[TASK]** {} (`{}`) [{}]", title, id, priority));
                 if let Some(desc) = description {
                     md.push_str(&format!(" - {}", desc));
                 }
