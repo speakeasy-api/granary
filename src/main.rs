@@ -151,8 +151,8 @@ async fn run(cli: Cli) -> granary::Result<()> {
             initiatives::initiative(&id, action, format).await?;
         }
 
-        Commands::Update { check } => {
-            update::update(check).await?;
+        Commands::Update { check, to } => {
+            update::update(check, to).await?;
         }
     }
 

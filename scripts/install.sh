@@ -80,17 +80,38 @@ download() {
     fi
 }
 
-# Get latest release version from GitHub
+# Check if a version string is a pre-release (contains '-')
+is_prerelease() {
+    case "$1" in
+        *-*) return 0 ;;  # Contains '-', is pre-release
+        *)   return 1 ;;  # No '-', is stable
+    esac
+}
+
+# Get latest stable release version from GitHub (excludes pre-releases)
 get_latest_version() {
-    url="https://api.github.com/repos/${REPO}/releases/latest"
+    url="https://api.github.com/repos/${REPO}/releases"
     if command -v curl >/dev/null 2>&1; then
-        version=$(curl -sSf "$url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        releases=$(curl -sSf "$url")
     else
-        version=$(wget -qO- "$url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        releases=$(wget -qO- "$url")
     fi
 
+    if [ -z "$releases" ]; then
+        error "Could not fetch releases. Check your internet connection or visit https://github.com/${REPO}/releases"
+    fi
+
+    # Extract all tag names and find first non-prerelease
+    version=""
+    for tag in $(echo "$releases" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'); do
+        if ! is_prerelease "$tag"; then
+            version="$tag"
+            break
+        fi
+    done
+
     if [ -z "$version" ]; then
-        error "Could not determine latest version. Check your internet connection or visit https://github.com/${REPO}/releases"
+        error "Could not determine latest stable version. Check https://github.com/${REPO}/releases"
     fi
 
     echo "$version"
@@ -107,8 +128,19 @@ main() {
 
     info "Detected platform: ${TARGET}"
 
-    VERSION=$(get_latest_version)
-    info "Latest version: ${VERSION}"
+    # Use GRANARY_VERSION env var if set, otherwise fetch latest stable
+    if [ -n "${GRANARY_VERSION:-}" ]; then
+        VERSION="${GRANARY_VERSION}"
+        # Add 'v' prefix if not present (GitHub tags use 'v' prefix)
+        case "$VERSION" in
+            v*) ;;
+            *)  VERSION="v${VERSION}" ;;
+        esac
+        info "Installing requested version: ${VERSION}"
+    else
+        VERSION=$(get_latest_version)
+        info "Latest version: ${VERSION}"
+    fi
 
     # Construct download URL
     ARCHIVE_NAME="${BINARY_NAME}-${TARGET}.tar.gz"

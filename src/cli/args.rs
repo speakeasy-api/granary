@@ -280,6 +280,10 @@ pub enum Commands {
         /// Check for updates without installing
         #[arg(long)]
         check: bool,
+
+        /// Install a specific version (e.g., 0.6.2-pre.1)
+        #[arg(long)]
+        to: Option<String>,
     },
 }
 

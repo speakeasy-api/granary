@@ -1,6 +1,6 @@
 [package]
 name = "granary"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 description = "A CLI context hub for agentic work"
 license = "MIT"

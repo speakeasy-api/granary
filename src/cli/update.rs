@@ -10,15 +10,18 @@ use crate::error::{GranaryError, Result};
 const GITHUB_REPO: &str = "danielkov/granary";
 const CACHE_TTL_HOURS: i64 = 24;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct GitHubRelease {
     tag_name: String,
+    prerelease: bool,
 }
 
 #[derive(Serialize, Deserialize)]
 struct UpdateCache {
     last_check: DateTime<Utc>,
     latest_version: String,
+    #[serde(default)]
+    latest_prerelease: Option<String>,
 }
 
 /// Get cache file path (~/.granary/update-check.json)
@@ -48,7 +51,7 @@ fn read_cache() -> Option<UpdateCache> {
 }
 
 /// Write update cache
-fn write_cache(latest: &str) -> Result<()> {
+fn write_cache(latest_stable: &str, latest_prerelease: Option<&str>) -> Result<()> {
     let Some(path) = cache_path() else {
         return Ok(()); // Silently skip if no home dir
     };
@@ -60,7 +63,8 @@ fn write_cache(latest: &str) -> Result<()> {
 
     let cache = UpdateCache {
         last_check: Utc::now(),
-        latest_version: latest.to_string(),
+        latest_version: latest_stable.to_string(),
+        latest_prerelease: latest_prerelease.map(|s| s.to_string()),
     };
 
     let content = serde_json::to_string_pretty(&cache)?;
@@ -68,12 +72,15 @@ fn write_cache(latest: &str) -> Result<()> {
     Ok(())
 }
 
-/// Fetch latest version from GitHub API
-async fn fetch_latest_version() -> Result<String> {
-    let url = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        GITHUB_REPO
-    );
+/// Version info from GitHub releases
+struct VersionInfo {
+    latest_stable: String,
+    latest_prerelease: Option<String>,
+}
+
+/// Fetch all releases from GitHub API
+async fn fetch_releases() -> Result<Vec<GitHubRelease>> {
+    let url = format!("https://api.github.com/repos/{}/releases", GITHUB_REPO);
 
     let client = reqwest::Client::new();
     let response = client
@@ -90,17 +97,40 @@ async fn fetch_latest_version() -> Result<String> {
         )));
     }
 
-    let release: GitHubRelease = response
+    let releases: Vec<GitHubRelease> = response
         .json()
         .await
         .map_err(|e| GranaryError::Network(e.to_string()))?;
 
-    // Strip leading 'v' if present
-    let version = release
-        .tag_name
-        .strip_prefix('v')
-        .unwrap_or(&release.tag_name);
-    Ok(version.to_string())
+    Ok(releases)
+}
+
+/// Strip 'v' prefix from version string
+fn strip_v_prefix(version: &str) -> &str {
+    version.strip_prefix('v').unwrap_or(version)
+}
+
+/// Fetch version info from GitHub (latest stable and optionally latest prerelease)
+async fn fetch_version_info() -> Result<VersionInfo> {
+    let releases = fetch_releases().await?;
+
+    // Find latest stable (first non-prerelease)
+    let latest_stable = releases
+        .iter()
+        .find(|r| !r.prerelease)
+        .map(|r| strip_v_prefix(&r.tag_name).to_string())
+        .ok_or_else(|| GranaryError::Network("No stable releases found".to_string()))?;
+
+    // Find latest prerelease (first prerelease)
+    let latest_prerelease = releases
+        .iter()
+        .find(|r| r.prerelease)
+        .map(|r| strip_v_prefix(&r.tag_name).to_string());
+
+    Ok(VersionInfo {
+        latest_stable,
+        latest_prerelease,
+    })
 }
 
 /// Compare two version strings using semver
@@ -114,13 +144,13 @@ fn is_newer_version(current: &str, latest: &str) -> bool {
 /// Check for update (fetches from GitHub and updates cache)
 pub async fn check_for_update() -> Result<Option<String>> {
     let current = env!("CARGO_PKG_VERSION");
-    let latest = fetch_latest_version().await?;
+    let info = fetch_version_info().await?;
 
     // Update cache
-    let _ = write_cache(&latest);
+    let _ = write_cache(&info.latest_stable, info.latest_prerelease.as_deref());
 
-    if is_newer_version(current, &latest) {
-        Ok(Some(latest))
+    if is_newer_version(current, &info.latest_stable) {
+        Ok(Some(info.latest_stable))
     } else {
         Ok(None)
     }
@@ -154,12 +184,19 @@ pub fn version_with_update_notice() -> &'static str {
 }
 
 /// Run the install script to perform the update
-fn run_install_script() -> Result<()> {
+fn run_install_script(version: Option<&str>) -> Result<()> {
     #[cfg(unix)]
     {
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg("curl -sSfL https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.sh | sh")
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg("curl -sSfL https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.sh | sh");
+
+        // Set GRANARY_VERSION env var if a specific version is requested
+        if let Some(v) = version {
+            cmd.env("GRANARY_VERSION", v);
+        }
+
+        let status = cmd
             .status()
             .map_err(|e| GranaryError::Update(format!("Failed to run install script: {}", e)))?;
 
@@ -170,9 +207,19 @@ fn run_install_script() -> Result<()> {
 
     #[cfg(windows)]
     {
+        let script = if let Some(v) = version {
+            format!(
+                "$env:GRANARY_VERSION='{}'; irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex",
+                v
+            )
+        } else {
+            "irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex"
+                .to_string()
+        };
+
         let status = Command::new("powershell")
             .arg("-Command")
-            .arg("irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex")
+            .arg(&script)
             .status()
             .map_err(|e| GranaryError::Update(format!("Failed to run install script: {}", e)))?;
 
@@ -185,12 +232,24 @@ fn run_install_script() -> Result<()> {
 }
 
 /// Main update command handler
-pub async fn update(check_only: bool) -> Result<()> {
+pub async fn update(check_only: bool, target_version: Option<String>) -> Result<()> {
     let current = env!("CARGO_PKG_VERSION");
+
+    // If a specific version is requested, install it directly
+    if let Some(ref version) = target_version {
+        println!("Installing granary {}...", version);
+        println!();
+
+        run_install_script(Some(version))?;
+
+        println!();
+        println!("Successfully installed granary {}!", version);
+        return Ok(());
+    }
 
     println!("Checking for updates...");
 
-    let latest = match fetch_latest_version().await {
+    let info = match fetch_version_info().await {
         Ok(v) => v,
         Err(e) => {
             return Err(GranaryError::Update(format!(
@@ -201,27 +260,62 @@ pub async fn update(check_only: bool) -> Result<()> {
     };
 
     // Update cache
-    let _ = write_cache(&latest);
+    let _ = write_cache(&info.latest_stable, info.latest_prerelease.as_deref());
 
-    if !is_newer_version(current, &latest) {
-        println!("granary {} is the latest version", current);
+    let has_stable_update = is_newer_version(current, &info.latest_stable);
+
+    // Check if there's a prerelease newer than the latest stable
+    let newer_prerelease = info.latest_prerelease.as_ref().and_then(|pre| {
+        if is_newer_version(&info.latest_stable, pre) {
+            Some(pre.clone())
+        } else {
+            None
+        }
+    });
+
+    if !has_stable_update {
+        println!("granary {} is the latest stable version", current);
+
+        // Show prerelease info if available and newer
+        if let Some(pre) = &newer_prerelease {
+            println!();
+            println!("Pre-release available: {}", pre);
+            println!("Install with: granary update --to={}", pre);
+        }
+
         return Ok(());
     }
 
     if check_only {
         println!("Current version: {}", current);
-        println!("Latest version:  {}", latest);
-        println!("\nRun `granary update` to install.");
+        println!("Latest version:  {}", info.latest_stable);
+
+        // Show prerelease info if available and newer
+        if let Some(pre) = &newer_prerelease {
+            println!();
+            println!("Pre-release available: {}", pre);
+            println!("Install with: granary update --to={}", pre);
+        }
+
+        println!();
+        println!("Run `granary update` to install the latest stable version.");
         return Ok(());
     }
 
-    println!("Updating granary {} → {}...", current, latest);
+    println!("Updating granary {} → {}...", current, info.latest_stable);
     println!();
 
-    run_install_script()?;
+    run_install_script(None)?;
 
     println!();
-    println!("Successfully updated to granary {}!", latest);
+    println!("Successfully updated to granary {}!", info.latest_stable);
+
+    // Inform about prerelease if available
+    if let Some(pre) = &newer_prerelease {
+        println!();
+        println!("Pre-release {} is also available.", pre);
+        println!("Install with: granary update --to={}", pre);
+    }
 
     Ok(())
 }

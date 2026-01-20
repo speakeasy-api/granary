@@ -58,6 +58,36 @@ curl -sSfL https://raw.githubusercontent.com/danielkov/granary/main/scripts/inst
 irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex
 ```
 
+### Installing a specific version
+
+You can install a specific version (including pre-releases) by setting the `GRANARY_VERSION` environment variable:
+
+**macOS / Linux:**
+
+```sh
+GRANARY_VERSION=0.6.2 curl -sSfL https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+$env:GRANARY_VERSION='0.6.2'; irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex
+```
+
+### Updating
+
+To update to the latest stable version:
+
+```sh
+granary update
+```
+
+To install a specific version (including pre-releases):
+
+```sh
+granary update --to=0.6.3-pre.1
+```
+
 ### From source
 
 Requires [Rust](https://rustup.rs/):

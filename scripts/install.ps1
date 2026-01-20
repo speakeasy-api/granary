@@ -43,10 +43,16 @@ function Get-Architecture {
 }
 
 function Get-LatestVersion {
-    $url = "https://api.github.com/repos/$Repo/releases/latest"
+    $url = "https://api.github.com/repos/$Repo/releases"
     try {
-        $response = Invoke-RestMethod -Uri $url -Method Get -UseBasicParsing
-        return $response.tag_name
+        $releases = Invoke-RestMethod -Uri $url -Method Get -UseBasicParsing
+        # Find first non-prerelease (stable) version
+        foreach ($release in $releases) {
+            if (-not $release.prerelease) {
+                return $release.tag_name
+            }
+        }
+        Write-Err "No stable releases found. Check https://github.com/$Repo/releases"
     }
     catch {
         Write-Err "Failed to get latest version. Check your internet connection or visit https://github.com/$Repo/releases"
@@ -61,8 +67,18 @@ function Install-Granary {
 
     Write-Info "Detected platform: $target"
 
-    $version = Get-LatestVersion
-    Write-Info "Latest version: $version"
+    # Use GRANARY_VERSION env var if set, otherwise fetch latest stable
+    if ($env:GRANARY_VERSION) {
+        $version = $env:GRANARY_VERSION
+        # Add 'v' prefix if not present (GitHub tags use 'v' prefix)
+        if (-not $version.StartsWith("v")) {
+            $version = "v$version"
+        }
+        Write-Info "Installing requested version: $version"
+    } else {
+        $version = Get-LatestVersion
+        Write-Info "Latest version: $version"
+    }
 
     $archiveName = "$BinaryName-$target.zip"
     $downloadUrl = "https://github.com/$Repo/releases/download/$version/$archiveName"
