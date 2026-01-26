@@ -72,6 +72,16 @@ impl Formatter {
         }
     }
 
+    pub fn format_task_with_deps(&self, task: &Task, blocked_by: Vec<String>) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_task_with_deps(task, blocked_by),
+            OutputFormat::Yaml => yaml_format_task_with_deps(task, &blocked_by),
+            OutputFormat::Md => md_format_task_with_deps(task, &blocked_by),
+            OutputFormat::Prompt => prompt::format_task_with_deps(task, &blocked_by),
+            OutputFormat::Table => table::format_task_with_deps(task, &blocked_by),
+        }
+    }
+
     pub fn format_tasks(&self, tasks: &[Task]) -> String {
         match self.format {
             OutputFormat::Json => json::format_tasks(tasks),
@@ -79,6 +89,22 @@ impl Formatter {
             OutputFormat::Md => md_format_tasks(tasks),
             OutputFormat::Prompt => prompt::format_tasks(tasks),
             OutputFormat::Table => table::format_tasks(tasks),
+        }
+    }
+
+    pub fn format_tasks_with_deps(&self, tasks_with_deps: &[(Task, Vec<String>)]) -> String {
+        match self.format {
+            OutputFormat::Json => json::format_tasks_with_deps(tasks_with_deps),
+            OutputFormat::Yaml => yaml_format_tasks_with_deps(tasks_with_deps),
+            OutputFormat::Md => md_format_tasks_with_deps(tasks_with_deps),
+            OutputFormat::Prompt => {
+                let refs: Vec<(&Task, &[String])> = tasks_with_deps
+                    .iter()
+                    .map(|(t, d)| (t, d.as_slice()))
+                    .collect();
+                prompt::format_tasks_with_deps(&refs)
+            }
+            OutputFormat::Table => table::format_tasks_with_deps(tasks_with_deps),
         }
     }
 
@@ -249,11 +275,29 @@ fn yaml_format_projects(projects: &[Project]) -> String {
 }
 
 fn yaml_format_task(task: &Task) -> String {
-    serde_yaml::to_string(task).unwrap_or_else(|_| "Error formatting YAML".to_string())
+    let output = json::TaskOutput::from_task(task.clone());
+    serde_yaml::to_string(&output).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_task_with_deps(task: &Task, blocked_by: &[String]) -> String {
+    let output = json::TaskOutput::new(task.clone(), blocked_by.to_vec());
+    serde_yaml::to_string(&output).unwrap_or_else(|_| "Error formatting YAML".to_string())
 }
 
 fn yaml_format_tasks(tasks: &[Task]) -> String {
-    serde_yaml::to_string(tasks).unwrap_or_else(|_| "Error formatting YAML".to_string())
+    let outputs: Vec<json::TaskOutput> = tasks
+        .iter()
+        .map(|t| json::TaskOutput::from_task(t.clone()))
+        .collect();
+    serde_yaml::to_string(&outputs).unwrap_or_else(|_| "Error formatting YAML".to_string())
+}
+
+fn yaml_format_tasks_with_deps(tasks_with_deps: &[(Task, Vec<String>)]) -> String {
+    let outputs: Vec<json::TaskOutput> = tasks_with_deps
+        .iter()
+        .map(|(t, deps)| json::TaskOutput::new(t.clone(), deps.clone()))
+        .collect();
+    serde_yaml::to_string(&outputs).unwrap_or_else(|_| "Error formatting YAML".to_string())
 }
 
 fn yaml_format_comment(comment: &Comment) -> String {
@@ -319,6 +363,10 @@ fn md_format_projects(projects: &[Project]) -> String {
 }
 
 fn md_format_task(task: &Task) -> String {
+    md_format_task_with_deps(task, &[])
+}
+
+fn md_format_task_with_deps(task: &Task, blocked_by: &[String]) -> String {
     let mut md = String::new();
     let checkbox = if task.status == "done" { "[x]" } else { "[ ]" };
     md.push_str(&format!("## {} {}\n\n", checkbox, task.title));
@@ -336,14 +384,30 @@ fn md_format_task(task: &Task) -> String {
     if let Some(reason) = &task.blocked_reason {
         md.push_str(&format!("\n**Blocked:** {}\n", reason));
     }
+    if !blocked_by.is_empty() {
+        md.push_str(&format!("\n**Blocked by:** {}\n", blocked_by.join(", ")));
+    }
     md
 }
 
 fn md_format_tasks(tasks: &[Task]) -> String {
+    let tasks_with_deps: Vec<(&Task, &[String])> = tasks.iter().map(|t| (t, &[][..])).collect();
+    md_format_tasks_internal(&tasks_with_deps)
+}
+
+fn md_format_tasks_with_deps(tasks_with_deps: &[(Task, Vec<String>)]) -> String {
+    let refs: Vec<(&Task, &[String])> = tasks_with_deps
+        .iter()
+        .map(|(t, d)| (t, d.as_slice()))
+        .collect();
+    md_format_tasks_internal(&refs)
+}
+
+fn md_format_tasks_internal(tasks_with_deps: &[(&Task, &[String])]) -> String {
     let mut md = String::from("# Tasks\n\n");
-    for task in tasks {
+    for (task, blocked_by) in tasks_with_deps {
         let checkbox = if task.status == "done" { "[x]" } else { "[ ]" };
-        let blocked = if task.blocked_reason.is_some() {
+        let blocked = if task.blocked_reason.is_some() || !blocked_by.is_empty() {
             " (blocked)"
         } else {
             ""
@@ -354,6 +418,9 @@ fn md_format_tasks(tasks: &[Task]) -> String {
         ));
         if let Some(owner) = &task.owner {
             md.push_str(&format!(" @{}", owner));
+        }
+        if !blocked_by.is_empty() {
+            md.push_str(&format!(" blocked_by: {}", blocked_by.join(", ")));
         }
         md.push('\n');
     }

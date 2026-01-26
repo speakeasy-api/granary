@@ -87,9 +87,10 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
         Some(ProjectAction::Tasks { action }) => {
             match action {
                 None => {
-                    // List tasks
+                    // List tasks with dependency info
                     let tasks = services::list_tasks_by_project(&pool, id).await?;
-                    println!("{}", formatter.format_tasks(&tasks));
+                    let tasks_with_deps = services::get_tasks_with_deps(&pool, tasks).await?;
+                    println!("{}", formatter.format_tasks_with_deps(&tasks_with_deps));
                 }
                 Some(ProjectTasksAction::Create {
                     title,

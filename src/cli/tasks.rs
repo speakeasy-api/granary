@@ -44,8 +44,11 @@ pub async fn list_tasks(
         }
     };
 
+    // Enrich tasks with dependency information
+    let tasks_with_deps = services::get_tasks_with_deps(&pool, tasks).await?;
+
     let formatter = Formatter::new(format);
-    println!("{}", formatter.format_tasks(&tasks));
+    println!("{}", formatter.format_tasks_with_deps(&tasks_with_deps));
 
     Ok(())
 }
@@ -58,8 +61,8 @@ pub async fn task(id: &str, action: Option<TaskAction>, format: OutputFormat) ->
 
     match action {
         None => {
-            let task = services::get_task(&pool, id).await?;
-            println!("{}", formatter.format_task(&task));
+            let (task, blocked_by) = services::get_task_with_deps(&pool, id).await?;
+            println!("{}", formatter.format_task_with_deps(&task, blocked_by));
         }
 
         Some(TaskAction::Update {

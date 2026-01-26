@@ -90,6 +90,10 @@ impl From<&Task> for TaskRow {
 }
 
 pub fn format_task(task: &Task) -> String {
+    format_task_with_deps(task, &[])
+}
+
+pub fn format_task_with_deps(task: &Task, blocked_by: &[String]) -> String {
     let mut output = String::new();
     output.push_str(&format!("Task: {}\n", task.title));
     output.push_str(&format!("  ID:          {}\n", task.id));
@@ -108,6 +112,9 @@ pub fn format_task(task: &Task) -> String {
     }
     if let Some(reason) = &task.blocked_reason {
         output.push_str(&format!("  Blocked:     {}\n", reason));
+    }
+    if !blocked_by.is_empty() {
+        output.push_str(&format!("  Blocked by:  {}\n", blocked_by.join(", ")));
     }
     if let Some(due) = &task.due_at {
         output.push_str(&format!("  Due:         {}\n", due));
@@ -131,6 +138,30 @@ pub fn format_tasks(tasks: &[Task]) -> String {
         return "No tasks found.\n".to_string();
     }
     let rows: Vec<TaskRow> = tasks.iter().map(TaskRow::from).collect();
+    Table::new(rows).to_string()
+}
+
+pub fn format_tasks_with_deps(tasks_with_deps: &[(Task, Vec<String>)]) -> String {
+    if tasks_with_deps.is_empty() {
+        return "No tasks found.\n".to_string();
+    }
+    let rows: Vec<TaskRow> = tasks_with_deps
+        .iter()
+        .map(|(t, deps)| {
+            let status = if t.blocked_reason.is_some() || !deps.is_empty() {
+                format!("{} (blocked)", t.status)
+            } else {
+                t.status.clone()
+            };
+            TaskRow {
+                id: t.id.clone(),
+                title: truncate(&t.title, 40),
+                status,
+                priority: t.priority.clone(),
+                owner: t.owner.clone().unwrap_or_else(|| "-".to_string()),
+            }
+        })
+        .collect();
     Table::new(rows).to_string()
 }
 

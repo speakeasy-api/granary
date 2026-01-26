@@ -577,3 +577,29 @@ pub async fn unpin_task(pool: &SqlitePool, id: &str) -> Result<Task> {
     db::tasks::update(pool, &task).await?;
     get_task(pool, id).await
 }
+
+/// Get unmet dependencies for a task (task IDs that this task is blocked by)
+pub async fn get_unmet_dependency_ids(pool: &SqlitePool, task_id: &str) -> Result<Vec<String>> {
+    let unmet = db::dependencies::get_unmet(pool, task_id).await?;
+    Ok(unmet.iter().map(|t| t.id.clone()).collect())
+}
+
+/// Get a task with its unmet dependency information
+pub async fn get_task_with_deps(pool: &SqlitePool, id: &str) -> Result<(Task, Vec<String>)> {
+    let task = get_task(pool, id).await?;
+    let blocked_by = get_unmet_dependency_ids(pool, id).await?;
+    Ok((task, blocked_by))
+}
+
+/// Get multiple tasks with their unmet dependency information
+pub async fn get_tasks_with_deps(
+    pool: &SqlitePool,
+    tasks: Vec<Task>,
+) -> Result<Vec<(Task, Vec<String>)>> {
+    let mut result = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        let blocked_by = get_unmet_dependency_ids(pool, &task.id).await?;
+        result.push((task, blocked_by));
+    }
+    Ok(result)
+}
