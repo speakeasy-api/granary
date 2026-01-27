@@ -124,6 +124,7 @@ impl RunnerHandle {
 /// # Arguments
 /// * `run` - The run record containing command and arguments
 /// * `log_dir` - Directory to write log files to
+/// * `working_dir` - Working directory for the spawned process
 ///
 /// # Returns
 /// A `RunnerHandle` that can be used to track and wait for the process.
@@ -135,7 +136,7 @@ impl RunnerHandle {
 /// # Process Groups
 /// On Unix, the spawned process becomes a session leader and process group leader
 /// via `setsid()`. This allows the entire process tree to be killed when stopping.
-pub async fn spawn_runner(run: &Run, log_dir: &Path) -> Result<RunnerHandle> {
+pub async fn spawn_runner(run: &Run, log_dir: &Path, working_dir: &Path) -> Result<RunnerHandle> {
     // Ensure log directory exists
     std::fs::create_dir_all(log_dir)?;
 
@@ -147,6 +148,7 @@ pub async fn spawn_runner(run: &Run, log_dir: &Path) -> Result<RunnerHandle> {
 
     let mut cmd = Command::new(&run.command);
     cmd.args(&args)
+        .current_dir(working_dir)
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_stderr));
 
@@ -188,6 +190,7 @@ pub async fn spawn_runner(run: &Run, log_dir: &Path) -> Result<RunnerHandle> {
 /// # Arguments
 /// * `run` - The run record containing command and arguments
 /// * `log_dir` - Directory to write log files to
+/// * `working_dir` - Working directory for the spawned process
 /// * `env_vars` - Environment variables to set for the process
 ///
 /// # Returns
@@ -199,6 +202,7 @@ pub async fn spawn_runner(run: &Run, log_dir: &Path) -> Result<RunnerHandle> {
 pub async fn spawn_runner_with_env(
     run: &Run,
     log_dir: &Path,
+    working_dir: &Path,
     env_vars: &[(String, String)],
 ) -> Result<RunnerHandle> {
     // Ensure log directory exists
@@ -212,6 +216,7 @@ pub async fn spawn_runner_with_env(
 
     let mut cmd = Command::new(&run.command);
     cmd.args(&args)
+        .current_dir(working_dir)
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_stderr));
 
@@ -312,7 +317,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let run = create_test_run("echo", vec!["hello", "world"]);
 
-        let handle = spawn_runner(&run, temp_dir.path()).await.unwrap();
+        let handle = spawn_runner(&run, temp_dir.path(), temp_dir.path())
+            .await
+            .unwrap();
         assert!(!handle.run_id.is_empty());
         assert!(handle.pid > 0);
 
@@ -330,7 +337,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let run = create_test_run("false", vec![]); // 'false' command always exits with 1
 
-        let handle = spawn_runner(&run, temp_dir.path()).await.unwrap();
+        let handle = spawn_runner(&run, temp_dir.path(), temp_dir.path())
+            .await
+            .unwrap();
         let (exit_code, error) = handle.wait().await.unwrap();
 
         assert_eq!(exit_code, 1);
@@ -343,7 +352,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let run = create_test_run("nonexistent_command_12345", vec![]);
 
-        let result = spawn_runner(&run, temp_dir.path()).await;
+        let result = spawn_runner(&run, temp_dir.path(), temp_dir.path()).await;
         assert!(result.is_err());
     }
 
@@ -353,7 +362,9 @@ mod tests {
         // Use 'sleep' to have a long-running process
         let run = create_test_run("sleep", vec!["10"]);
 
-        let mut handle = spawn_runner(&run, temp_dir.path()).await.unwrap();
+        let mut handle = spawn_runner(&run, temp_dir.path(), temp_dir.path())
+            .await
+            .unwrap();
 
         // Process should still be running
         let result = handle.try_wait().unwrap();

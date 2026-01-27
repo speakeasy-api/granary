@@ -279,8 +279,9 @@ impl WorkerRuntime {
             .execute(&self.global_pool)
             .await?;
 
-        // Spawn the runner
-        let handle = spawn_runner(&run, &self.log_dir).await?;
+        // Spawn the runner in the workspace directory
+        let workspace_path = std::path::Path::new(&self.worker.instance_path);
+        let handle = spawn_runner(&run, &self.log_dir, workspace_path).await?;
 
         // Update run status to running with PID
         let update = UpdateRunStatus {
@@ -409,8 +410,9 @@ impl WorkerRuntime {
                 self.worker.id, run.id, run.attempt, run.max_attempts
             );
 
-            // Spawn the runner
-            let handle = spawn_runner(&run, &self.log_dir).await?;
+            // Spawn the runner in the workspace directory
+            let workspace_path = std::path::Path::new(&self.worker.instance_path);
+            let handle = spawn_runner(&run, &self.log_dir, workspace_path).await?;
 
             // Update run status to running with PID
             let update = UpdateRunStatus {
