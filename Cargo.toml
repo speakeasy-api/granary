@@ -34,8 +34,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # Utilities
 rand = "0.9"
 uuid = { version = "1", features = ["v4"] }
-dirs = "5"
-toml = "0.8"
+dirs = "6.0"
+toml = "0.9"
 futures = "0.3"
 
 # Output formatting
@@ -59,7 +59,7 @@ libc = "0.2"
 
 # Windows-specific dependencies
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation"] }
 
 [[bin]]
 name = "granaryd"

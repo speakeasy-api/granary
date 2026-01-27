@@ -262,7 +262,9 @@ async fn stop_run(run_id: &str, format: OutputFormat) -> Result<()> {
     };
     db::runs::update_status(&global_pool, run_id, &update).await?;
 
-    let run = db::runs::get(&global_pool, run_id).await?.unwrap();
+    let run = db::runs::get(&global_pool, run_id)
+        .await?
+        .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
     let formatter = Formatter::new(format);
     println!("Run stopped.");
     println!("{}", formatter.format_run(&run));
@@ -312,7 +314,9 @@ async fn pause_run(run_id: &str, format: OutputFormat) -> Result<()> {
     };
     db::runs::update_status(&global_pool, run_id, &update).await?;
 
-    let run = db::runs::get(&global_pool, run_id).await?.unwrap();
+    let run = db::runs::get(&global_pool, run_id)
+        .await?
+        .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
     let formatter = Formatter::new(format);
     println!("Run paused.");
     println!("{}", formatter.format_run(&run));
@@ -362,7 +366,9 @@ async fn resume_run(run_id: &str, format: OutputFormat) -> Result<()> {
     };
     db::runs::update_status(&global_pool, run_id, &update).await?;
 
-    let run = db::runs::get(&global_pool, run_id).await?.unwrap();
+    let run = db::runs::get(&global_pool, run_id)
+        .await?
+        .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
     let formatter = Formatter::new(format);
     println!("Run resumed.");
     println!("{}", formatter.format_run(&run));

@@ -1765,9 +1765,17 @@ pub mod workers {
         })
     }
 
+    /// Column list for Worker queries (must match Worker struct field order)
+    const WORKER_COLUMNS: &str = r#"
+        id, runner_name, command, args, event_type, filters, concurrency,
+        instance_path, status, error_message, pid, detached, created_at,
+        updated_at, stopped_at, poll_cooldown_secs, last_event_id
+    "#;
+
     /// Get a worker by ID
     pub async fn get(pool: &SqlitePool, id: &str) -> Result<Option<Worker>> {
-        let worker = sqlx::query_as::<_, Worker>("SELECT * FROM workers WHERE id = ?")
+        let query = format!("SELECT {} FROM workers WHERE id = ?", WORKER_COLUMNS);
+        let worker = sqlx::query_as::<_, Worker>(&query)
             .bind(id)
             .fetch_optional(pool)
             .await?;
@@ -1776,42 +1784,50 @@ pub mod workers {
 
     /// List all workers (global registry)
     pub async fn list(pool: &SqlitePool) -> Result<Vec<Worker>> {
-        let workers = sqlx::query_as::<_, Worker>("SELECT * FROM workers ORDER BY created_at DESC")
-            .fetch_all(pool)
-            .await?;
+        let query = format!(
+            "SELECT {} FROM workers ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query).fetch_all(pool).await?;
         Ok(workers)
     }
 
     /// List workers by status
     pub async fn list_by_status(pool: &SqlitePool, status: WorkerStatus) -> Result<Vec<Worker>> {
-        let workers = sqlx::query_as::<_, Worker>(
-            "SELECT * FROM workers WHERE status = ? ORDER BY created_at DESC",
-        )
-        .bind(status.as_str())
-        .fetch_all(pool)
-        .await?;
+        let query = format!(
+            "SELECT {} FROM workers WHERE status = ? ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query)
+            .bind(status.as_str())
+            .fetch_all(pool)
+            .await?;
         Ok(workers)
     }
 
     /// List workers for a specific workspace/instance
     pub async fn list_by_instance(pool: &SqlitePool, instance_path: &str) -> Result<Vec<Worker>> {
-        let workers = sqlx::query_as::<_, Worker>(
-            "SELECT * FROM workers WHERE instance_path = ? ORDER BY created_at DESC",
-        )
-        .bind(instance_path)
-        .fetch_all(pool)
-        .await?;
+        let query = format!(
+            "SELECT {} FROM workers WHERE instance_path = ? ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query)
+            .bind(instance_path)
+            .fetch_all(pool)
+            .await?;
         Ok(workers)
     }
 
     /// List workers by event type
     pub async fn list_by_event_type(pool: &SqlitePool, event_type: &str) -> Result<Vec<Worker>> {
-        let workers = sqlx::query_as::<_, Worker>(
-            "SELECT * FROM workers WHERE event_type = ? ORDER BY created_at DESC",
-        )
-        .bind(event_type)
-        .fetch_all(pool)
-        .await?;
+        let query = format!(
+            "SELECT {} FROM workers WHERE event_type = ? ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query)
+            .bind(event_type)
+            .fetch_all(pool)
+            .await?;
         Ok(workers)
     }
 
@@ -1881,11 +1897,11 @@ pub mod workers {
 
     /// Get running workers (for health checks)
     pub async fn get_running(pool: &SqlitePool) -> Result<Vec<Worker>> {
-        let workers = sqlx::query_as::<_, Worker>(
-            "SELECT * FROM workers WHERE status = 'running' ORDER BY created_at DESC",
-        )
-        .fetch_all(pool)
-        .await?;
+        let query = format!(
+            "SELECT {} FROM workers WHERE status = 'running' ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query).fetch_all(pool).await?;
         Ok(workers)
     }
 
@@ -1893,11 +1909,11 @@ pub mod workers {
     ///
     /// This is used by WorkerManager to filter out stopped/errored workers.
     pub async fn list_active(pool: &SqlitePool) -> Result<Vec<Worker>> {
-        let workers = sqlx::query_as::<_, Worker>(
-            "SELECT * FROM workers WHERE status IN ('running', 'pending') ORDER BY created_at DESC",
-        )
-        .fetch_all(pool)
-        .await?;
+        let query = format!(
+            "SELECT {} FROM workers WHERE status IN ('running', 'pending') ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query).fetch_all(pool).await?;
         Ok(workers)
     }
 

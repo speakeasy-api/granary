@@ -180,10 +180,6 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn event_type_enum(&self) -> EventType {
-        self.event_type.parse().unwrap()
-    }
-
     pub fn entity_type_enum(&self) -> Option<EntityType> {
         self.entity_type.parse().ok()
     }

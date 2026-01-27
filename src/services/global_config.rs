@@ -8,6 +8,11 @@ use crate::error::{GranaryError, Result};
 use crate::models::global_config::{GlobalConfig, RunnerConfig};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
+use tokio::sync::OnceCell;
+
+/// Singleton for the global database pool.
+/// Ensures migrations run exactly once before any queries.
+static GLOBAL_POOL: OnceCell<SqlitePool> = OnceCell::const_new();
 
 /// Get the global granary config directory (~/.granary)
 pub fn config_dir() -> Result<PathBuf> {
@@ -101,19 +106,26 @@ pub fn worker_logs_dir(worker_id: &str) -> Result<PathBuf> {
     Ok(logs_dir()?.join(worker_id))
 }
 
-/// Get a connection pool to the global workers database
-/// Creates the database and runs migrations if it doesn't exist
+/// Get a connection pool to the global workers database.
+///
+/// This returns a singleton pool that is initialized once per process.
+/// Migrations are guaranteed to complete before any queries can run.
 pub async fn global_pool() -> Result<SqlitePool> {
-    let db_path = global_db_path()?;
+    GLOBAL_POOL
+        .get_or_try_init(|| async {
+            let db_path = global_db_path()?;
 
-    // Ensure the directory exists
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+            // Ensure the directory exists
+            if let Some(parent) = db_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
 
-    let pool = create_pool(&db_path).await?;
-    run_migrations(&pool).await?;
-    Ok(pool)
+            let pool = create_pool(&db_path).await?;
+            run_migrations(&pool).await?;
+            Ok(pool)
+        })
+        .await
+        .cloned()
 }
 
 /// Load the global configuration from ~/.granary/config.toml
