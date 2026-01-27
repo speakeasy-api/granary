@@ -1,7 +1,7 @@
 {
   "name": "granary",
   "description": "Context hub for agentic workflows - manage projects, tasks, sessions, and multi-agent coordination",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": {
     "name": "Daniel Kovacs <kovacsemod@gmail.com>"
   },
