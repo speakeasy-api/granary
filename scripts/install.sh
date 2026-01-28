@@ -88,6 +88,18 @@ is_prerelease() {
     esac
 }
 
+# Extract tag names from GitHub releases JSON
+# Uses jq if available, falls back to sed
+extract_tag_names() {
+    if command -v jq >/dev/null 2>&1; then
+        jq -r '.[].tag_name'
+    else
+        # Fallback: use sed to extract tag_name values
+        # Works with both pretty-printed and compact JSON
+        sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p'
+    fi
+}
+
 # Get latest stable release version from GitHub (excludes pre-releases)
 get_latest_version() {
     url="https://api.github.com/repos/${REPO}/releases"
@@ -102,8 +114,9 @@ get_latest_version() {
     fi
 
     # Extract all tag names and find first non-prerelease
+    # Use printf instead of echo to avoid escape sequence interpretation
     version=""
-    for tag in $(echo "$releases" | grep '"tag_name":' | cut -d'"' -f4); do
+    for tag in $(printf '%s' "$releases" | extract_tag_names); do
         if ! is_prerelease "$tag"; then
             version="$tag"
             break
