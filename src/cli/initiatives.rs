@@ -153,9 +153,11 @@ pub async fn initiative(
             if tasks.is_empty() {
                 println!("No actionable tasks in initiative {}", id);
             } else if all {
-                println!("{}", formatter.format_tasks(&tasks));
+                let tasks_with_deps = services::get_tasks_with_deps(&pool, tasks).await?;
+                println!("{}", formatter.format_tasks_with_deps(&tasks_with_deps));
             } else {
-                println!("{}", formatter.format_task(&tasks[0]));
+                let (task, blocked_by) = services::get_task_with_deps(&pool, &tasks[0].id).await?;
+                println!("{}", formatter.format_task_with_deps(&task, blocked_by));
             }
         }
 

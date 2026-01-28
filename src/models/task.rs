@@ -5,6 +5,7 @@ use sqlx::FromRow;
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     #[default]
+    Draft,
     Todo,
     InProgress,
     Done,
@@ -14,6 +15,7 @@ pub enum TaskStatus {
 impl TaskStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
+            TaskStatus::Draft => "draft",
             TaskStatus::Todo => "todo",
             TaskStatus::InProgress => "in_progress",
             TaskStatus::Done => "done",
@@ -24,6 +26,10 @@ impl TaskStatus {
     pub fn is_terminal(&self) -> bool {
         matches!(self, TaskStatus::Done)
     }
+
+    pub fn is_draft(&self) -> bool {
+        matches!(self, TaskStatus::Draft)
+    }
 }
 
 impl std::str::FromStr for TaskStatus {
@@ -31,6 +37,7 @@ impl std::str::FromStr for TaskStatus {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
+            "draft" => Ok(TaskStatus::Draft),
             "todo" => Ok(TaskStatus::Todo),
             "in_progress" | "in-progress" | "inprogress" => Ok(TaskStatus::InProgress),
             "done" | "completed" => Ok(TaskStatus::Done),

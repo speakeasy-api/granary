@@ -73,8 +73,8 @@ pub async fn show(id: &str, format: OutputFormat) -> Result<()> {
         }
 
         EntityKind::Task => {
-            let task = services::get_task(&pool, id).await?;
-            println!("{}", formatter.format_task(&task));
+            let (task, blocked_by) = services::get_task_with_deps(&pool, id).await?;
+            println!("{}", formatter.format_task_with_deps(&task, blocked_by));
         }
 
         EntityKind::Session => {

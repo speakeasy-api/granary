@@ -39,6 +39,15 @@ pub enum GranaryError {
     #[error("Initiative not found: {0}")]
     InitiativeNotFound(String),
 
+    #[error("Worker not found: {0}")]
+    WorkerNotFound(String),
+
+    #[error("Run not found: {0}")]
+    RunNotFound(String),
+
+    #[error("Runner not found: {0}")]
+    RunnerNotFound(String),
+
     #[error("No active session. Start one with 'granary session start <name>'.")]
     NoActiveSession,
 
@@ -86,6 +95,21 @@ pub enum GranaryError {
 
     #[error("Update error: {0}")]
     Update(String),
+
+    #[error("Global config error: {0}")]
+    GlobalConfig(String),
+
+    #[error("TOML parse error: {0}")]
+    Toml(#[from] toml::de::Error),
+
+    #[error("Failed to connect to daemon: {0}")]
+    DaemonConnection(String),
+
+    #[error("Daemon protocol error: {0}")]
+    DaemonProtocol(String),
+
+    #[error("Daemon error: {0}")]
+    DaemonError(String),
 }
 
 impl GranaryError {
@@ -103,6 +127,9 @@ impl GranaryError {
             | GranaryError::CheckpointNotFound(_)
             | GranaryError::ArtifactNotFound(_)
             | GranaryError::InitiativeNotFound(_)
+            | GranaryError::WorkerNotFound(_)
+            | GranaryError::RunNotFound(_)
+            | GranaryError::RunnerNotFound(_)
             | GranaryError::NoActiveSession => exit_codes::NOT_FOUND,
 
             // Conflict errors (concurrency, claims)
@@ -124,7 +151,12 @@ impl GranaryError {
             | GranaryError::Json(_)
             | GranaryError::Yaml(_)
             | GranaryError::Network(_)
-            | GranaryError::Update(_) => exit_codes::INTERNAL,
+            | GranaryError::Update(_)
+            | GranaryError::GlobalConfig(_)
+            | GranaryError::Toml(_)
+            | GranaryError::DaemonConnection(_)
+            | GranaryError::DaemonProtocol(_)
+            | GranaryError::DaemonError(_) => exit_codes::INTERNAL,
         }
     }
 }

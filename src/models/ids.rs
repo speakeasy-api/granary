@@ -93,6 +93,22 @@ pub fn generate_checkpoint_id() -> String {
     format!("chkpt-{}", suffix)
 }
 
+/// Generate a worker ID
+/// Format: worker-<suffix>
+/// Example: "worker-a3f8k2m1"
+pub fn generate_worker_id() -> String {
+    let suffix = generate_suffix(8);
+    format!("worker-{}", suffix)
+}
+
+/// Generate a run ID
+/// Format: run-<suffix>
+/// Example: "run-a3f8k2m1"
+pub fn generate_run_id() -> String {
+    let suffix = generate_suffix(8);
+    format!("run-{}", suffix)
+}
+
 /// Generate an initiative ID from a name
 /// Format: <slug>-<suffix>
 /// Example: "my-initiative-5h18"
@@ -231,5 +247,19 @@ mod tests {
     fn test_parse_initiative_slug() {
         let slug = parse_initiative_slug("my-initiative-5h18").unwrap();
         assert_eq!(slug, "my-initiative");
+    }
+
+    #[test]
+    fn test_generate_worker_id() {
+        let id = generate_worker_id();
+        assert!(id.starts_with("worker-"));
+        assert_eq!(id.len(), "worker-".len() + 8);
+    }
+
+    #[test]
+    fn test_generate_run_id() {
+        let id = generate_run_id();
+        assert!(id.starts_with("run-"));
+        assert_eq!(id.len(), "run-".len() + 8);
     }
 }

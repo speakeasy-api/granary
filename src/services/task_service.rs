@@ -29,7 +29,7 @@ pub async fn create_task(pool: &SqlitePool, input: CreateTask) -> Result<Task> {
         parent_task_id: input.parent_task_id,
         title: input.title,
         description: input.description,
-        status: TaskStatus::Todo.as_str().to_string(),
+        status: TaskStatus::Draft.as_str().to_string(),
         priority: input.priority.as_str().to_string(),
         owner: input.owner,
         tags,
@@ -171,9 +171,60 @@ pub async fn update_task(pool: &SqlitePool, id: &str, updates: UpdateTask) -> Re
     get_task(pool, id).await
 }
 
+/// Mark a draft task as ready (transition Draft -> Todo)
+pub async fn ready_task(pool: &SqlitePool, id: &str) -> Result<Task> {
+    let mut task = get_task(pool, id).await?;
+
+    // Check if task is in Draft status
+    if !task.status_enum().is_draft() {
+        return Err(GranaryError::Conflict(format!(
+            "Task {} is not in Draft status (current status: {}). Only draft tasks can be marked as ready.",
+            id, task.status
+        )));
+    }
+
+    task.status = TaskStatus::Todo.as_str().to_string();
+
+    let updated = db::tasks::update(pool, &task).await?;
+    if !updated {
+        return Err(GranaryError::VersionMismatch {
+            expected: task.version,
+            found: task.version + 1,
+        });
+    }
+
+    // Log event
+    db::events::create(
+        pool,
+        &CreateEvent {
+            event_type: EventType::TaskUpdated,
+            entity_type: EntityType::Task,
+            entity_id: task.id.clone(),
+            actor: None,
+            session_id: None,
+            payload: serde_json::json!({
+                "old_status": "draft",
+                "new_status": "todo",
+                "action": "ready",
+            }),
+        },
+    )
+    .await?;
+
+    get_task(pool, id).await
+}
+
 /// Start a task (set status to in_progress)
 pub async fn start_task(pool: &SqlitePool, id: &str, owner: Option<String>) -> Result<Task> {
     let mut task = get_task(pool, id).await?;
+
+    // Check if task is in Draft status
+    if task.status_enum().is_draft() {
+        return Err(GranaryError::Conflict(format!(
+            "Task {} is in Draft status. Use 'granary task {} ready' to mark it as ready before starting.",
+            id, id
+        )));
+    }
 
     // Check if task is already terminal
     if task.status_enum().is_terminal() {
@@ -525,4 +576,30 @@ pub async fn unpin_task(pool: &SqlitePool, id: &str) -> Result<Task> {
     task.pinned = 0;
     db::tasks::update(pool, &task).await?;
     get_task(pool, id).await
+}
+
+/// Get unmet dependencies for a task (task IDs that this task is blocked by)
+pub async fn get_unmet_dependency_ids(pool: &SqlitePool, task_id: &str) -> Result<Vec<String>> {
+    let unmet = db::dependencies::get_unmet(pool, task_id).await?;
+    Ok(unmet.iter().map(|t| t.id.clone()).collect())
+}
+
+/// Get a task with its unmet dependency information
+pub async fn get_task_with_deps(pool: &SqlitePool, id: &str) -> Result<(Task, Vec<String>)> {
+    let task = get_task(pool, id).await?;
+    let blocked_by = get_unmet_dependency_ids(pool, id).await?;
+    Ok((task, blocked_by))
+}
+
+/// Get multiple tasks with their unmet dependency information
+pub async fn get_tasks_with_deps(
+    pool: &SqlitePool,
+    tasks: Vec<Task>,
+) -> Result<Vec<(Task, Vec<String>)>> {
+    let mut result = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        let blocked_by = get_unmet_dependency_ids(pool, &task.id).await?;
+        result.push((task, blocked_by));
+    }
+    Ok(result)
 }

@@ -90,6 +90,10 @@ impl From<&Task> for TaskRow {
 }
 
 pub fn format_task(task: &Task) -> String {
+    format_task_with_deps(task, &[])
+}
+
+pub fn format_task_with_deps(task: &Task, blocked_by: &[String]) -> String {
     let mut output = String::new();
     output.push_str(&format!("Task: {}\n", task.title));
     output.push_str(&format!("  ID:          {}\n", task.id));
@@ -108,6 +112,9 @@ pub fn format_task(task: &Task) -> String {
     }
     if let Some(reason) = &task.blocked_reason {
         output.push_str(&format!("  Blocked:     {}\n", reason));
+    }
+    if !blocked_by.is_empty() {
+        output.push_str(&format!("  Blocked by:  {}\n", blocked_by.join(", ")));
     }
     if let Some(due) = &task.due_at {
         output.push_str(&format!("  Due:         {}\n", due));
@@ -131,6 +138,30 @@ pub fn format_tasks(tasks: &[Task]) -> String {
         return "No tasks found.\n".to_string();
     }
     let rows: Vec<TaskRow> = tasks.iter().map(TaskRow::from).collect();
+    Table::new(rows).to_string()
+}
+
+pub fn format_tasks_with_deps(tasks_with_deps: &[(Task, Vec<String>)]) -> String {
+    if tasks_with_deps.is_empty() {
+        return "No tasks found.\n".to_string();
+    }
+    let rows: Vec<TaskRow> = tasks_with_deps
+        .iter()
+        .map(|(t, deps)| {
+            let status = if t.blocked_reason.is_some() || !deps.is_empty() {
+                format!("{} (blocked)", t.status)
+            } else {
+                t.status.clone()
+            };
+            TaskRow {
+                id: t.id.clone(),
+                title: truncate(&t.title, 40),
+                status,
+                priority: t.priority.clone(),
+                owner: t.owner.clone().unwrap_or_else(|| "-".to_string()),
+            }
+        })
+        .collect();
     Table::new(rows).to_string()
 }
 
@@ -578,4 +609,184 @@ fn create_progress_bar(percent: f32, width: usize) -> String {
     let filled = ((percent / 100.0) * width as f32).round() as usize;
     let empty = width.saturating_sub(filled);
     format!("[{}{}]", "=".repeat(filled), " ".repeat(empty))
+}
+
+// === Worker formatting ===
+
+use crate::models::worker::Worker;
+
+#[derive(Tabled)]
+struct WorkerRow {
+    #[tabled(rename = "ID")]
+    id: String,
+    #[tabled(rename = "Status")]
+    status: String,
+    #[tabled(rename = "Runner")]
+    runner: String,
+    #[tabled(rename = "Event")]
+    event_type: String,
+    #[tabled(rename = "Concurrency")]
+    concurrency: String,
+    #[tabled(rename = "Workspace")]
+    instance_path: String,
+}
+
+impl From<&Worker> for WorkerRow {
+    fn from(w: &Worker) -> Self {
+        Self {
+            id: w.id.clone(),
+            status: w.status.clone(),
+            runner: w
+                .runner_name
+                .clone()
+                .unwrap_or_else(|| truncate(&w.command, 20)),
+            event_type: w.event_type.clone(),
+            concurrency: w.concurrency.to_string(),
+            instance_path: truncate_path(&w.instance_path, 30),
+        }
+    }
+}
+
+pub fn format_worker(worker: &Worker) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("Worker: {}\n", worker.id));
+    output.push_str(&format!("  Status:      {}\n", worker.status));
+    if let Some(runner) = &worker.runner_name {
+        output.push_str(&format!("  Runner:      {}\n", runner));
+    }
+    output.push_str(&format!("  Command:     {}\n", worker.command));
+    let args = worker.args_vec();
+    if !args.is_empty() {
+        output.push_str(&format!("  Args:        {}\n", args.join(" ")));
+    }
+    output.push_str(&format!("  Event Type:  {}\n", worker.event_type));
+    let filters = worker.filters_vec();
+    if !filters.is_empty() {
+        output.push_str(&format!("  Filters:     {}\n", filters.join(", ")));
+    }
+    output.push_str(&format!("  Concurrency: {}\n", worker.concurrency));
+    output.push_str(&format!("  Workspace:   {}\n", worker.instance_path));
+    output.push_str(&format!(
+        "  Detached:    {}\n",
+        if worker.detached { "yes" } else { "no" }
+    ));
+    if let Some(pid) = worker.pid {
+        output.push_str(&format!("  PID:         {}\n", pid));
+    }
+    if let Some(error) = &worker.error_message {
+        output.push_str(&format!("  Error:       {}\n", error));
+    }
+    output.push_str(&format!("  Created:     {}\n", worker.created_at));
+    output.push_str(&format!("  Updated:     {}\n", worker.updated_at));
+    if let Some(stopped) = &worker.stopped_at {
+        output.push_str(&format!("  Stopped:     {}\n", stopped));
+    }
+    output
+}
+
+pub fn format_workers(workers: &[Worker]) -> String {
+    if workers.is_empty() {
+        return "No workers found.\n".to_string();
+    }
+    let rows: Vec<WorkerRow> = workers.iter().map(WorkerRow::from).collect();
+    Table::new(rows).to_string()
+}
+
+/// Truncate a path, keeping the end portion
+fn truncate_path(path: &str, max_len: usize) -> String {
+    if path.len() <= max_len {
+        path.to_string()
+    } else {
+        format!("...{}", &path[path.len() - max_len + 3..])
+    }
+}
+
+// === Run formatting ===
+
+use crate::models::run::Run;
+
+#[derive(Tabled)]
+struct RunRow {
+    #[tabled(rename = "ID")]
+    id: String,
+    #[tabled(rename = "Worker")]
+    worker_id: String,
+    #[tabled(rename = "Event")]
+    event_type: String,
+    #[tabled(rename = "Entity")]
+    entity_id: String,
+    #[tabled(rename = "Status")]
+    status: String,
+    #[tabled(rename = "Attempt")]
+    attempt: String,
+    #[tabled(rename = "Exit")]
+    exit_code: String,
+}
+
+impl From<&Run> for RunRow {
+    fn from(r: &Run) -> Self {
+        Self {
+            id: r.id.clone(),
+            worker_id: truncate(&r.worker_id, 15),
+            event_type: truncate(&r.event_type, 20),
+            entity_id: truncate(&r.entity_id, 20),
+            status: r.status.clone(),
+            attempt: format!("{}/{}", r.attempt, r.max_attempts),
+            exit_code: r
+                .exit_code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+        }
+    }
+}
+
+pub fn format_run(run: &Run) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("Run: {}\n", run.id));
+    output.push_str(&format!("  Worker:      {}\n", run.worker_id));
+    output.push_str(&format!("  Event ID:    {}\n", run.event_id));
+    output.push_str(&format!("  Event Type:  {}\n", run.event_type));
+    output.push_str(&format!("  Entity ID:   {}\n", run.entity_id));
+    output.push_str(&format!("  Status:      {}\n", run.status));
+    output.push_str(&format!(
+        "  Attempt:     {}/{}\n",
+        run.attempt, run.max_attempts
+    ));
+    output.push_str(&format!("  Command:     {}\n", run.command));
+    let args = run.args_vec();
+    if !args.is_empty() {
+        output.push_str(&format!("  Args:        {}\n", args.join(" ")));
+    }
+    if let Some(exit) = run.exit_code {
+        output.push_str(&format!("  Exit Code:   {}\n", exit));
+    }
+    if let Some(ref error) = run.error_message {
+        output.push_str(&format!("  Error:       {}\n", error));
+    }
+    if let Some(pid) = run.pid {
+        output.push_str(&format!("  PID:         {}\n", pid));
+    }
+    if let Some(ref path) = run.log_path {
+        output.push_str(&format!("  Log Path:    {}\n", path));
+    }
+    if let Some(ref retry) = run.next_retry_at {
+        output.push_str(&format!("  Next Retry:  {}\n", retry));
+    }
+    if let Some(ref started) = run.started_at {
+        output.push_str(&format!("  Started:     {}\n", started));
+    }
+    if let Some(ref completed) = run.completed_at {
+        output.push_str(&format!("  Completed:   {}\n", completed));
+    }
+    output.push_str(&format!("  Created:     {}\n", run.created_at));
+    output.push_str(&format!("  Updated:     {}\n", run.updated_at));
+    output
+}
+
+pub fn format_runs(runs: &[Run]) -> String {
+    if runs.is_empty() {
+        return "No runs found.\n".to_string();
+    }
+    let rows: Vec<RunRow> = runs.iter().map(RunRow::from).collect();
+    Table::new(rows).to_string()
 }

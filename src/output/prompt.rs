@@ -42,6 +42,10 @@ pub fn format_projects(projects: &[Project]) -> String {
 }
 
 pub fn format_task(task: &Task) -> String {
+    format_task_with_deps(task, &[])
+}
+
+pub fn format_task_with_deps(task: &Task, blocked_by: &[String]) -> String {
     let mut output = String::new();
     output.push_str("<task>\n");
     output.push_str(&format!("id: {}\n", task.id));
@@ -61,6 +65,9 @@ pub fn format_task(task: &Task) -> String {
     if let Some(reason) = &task.blocked_reason {
         output.push_str(&format!("blocked_reason: {}\n", reason));
     }
+    if !blocked_by.is_empty() {
+        output.push_str(&format!("blocked_by: {}\n", blocked_by.join(", ")));
+    }
     if let Some(due) = &task.due_at {
         output.push_str(&format!("due_at: {}\n", due));
     }
@@ -72,17 +79,28 @@ pub fn format_task(task: &Task) -> String {
 }
 
 pub fn format_tasks(tasks: &[Task]) -> String {
+    // Create tasks with empty deps for backwards compatibility
+    let tasks_with_deps: Vec<(&Task, &[String])> = tasks.iter().map(|t| (t, &[][..])).collect();
+    format_tasks_with_deps(&tasks_with_deps)
+}
+
+pub fn format_tasks_with_deps(tasks_with_deps: &[(&Task, &[String])]) -> String {
     let mut output = String::new();
-    output.push_str(&format!("<tasks count=\"{}\">\n", tasks.len()));
-    for task in tasks {
-        let blocked = if task.blocked_reason.is_some() {
+    output.push_str(&format!("<tasks count=\"{}\">\n", tasks_with_deps.len()));
+    for (task, blocked_by) in tasks_with_deps {
+        let blocked = if task.blocked_reason.is_some() || !blocked_by.is_empty() {
             " [BLOCKED]"
         } else {
             ""
         };
+        let deps_info = if !blocked_by.is_empty() {
+            format!(" blocked_by: {}", blocked_by.join(", "))
+        } else {
+            String::new()
+        };
         output.push_str(&format!(
-            "  - [{}] {} ({}) {}{}\n",
-            task.priority, task.title, task.id, task.status, blocked
+            "  - [{}] {} ({}) {}{}{}\n",
+            task.priority, task.title, task.id, task.status, blocked, deps_info
         ));
     }
     output.push_str("</tasks>\n");
@@ -700,4 +718,94 @@ pub fn format_initiative_summary(summary: &InitiativeSummary) -> String {
     }
 
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_task() -> Task {
+        Task {
+            id: "test-proj-task-1".to_string(),
+            project_id: "test-proj".to_string(),
+            task_number: 1,
+            parent_task_id: None,
+            title: "Test Task".to_string(),
+            description: Some("A test task description".to_string()),
+            status: "todo".to_string(),
+            priority: "P1".to_string(),
+            owner: Some("test-user".to_string()),
+            tags: None,
+            blocked_reason: None,
+            started_at: None,
+            completed_at: None,
+            due_at: None,
+            claim_owner: None,
+            claim_claimed_at: None,
+            claim_lease_expires_at: None,
+            pinned: 0,
+            focus_weight: 0,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            version: 1,
+        }
+    }
+
+    #[test]
+    fn test_format_task_no_dependencies() {
+        let task = create_test_task();
+        let output = format_task(&task);
+
+        assert!(output.contains("id: test-proj-task-1"));
+        assert!(output.contains("title: Test Task"));
+        assert!(output.contains("status: todo"));
+        // Should NOT contain blocked_by when empty
+        assert!(!output.contains("blocked_by:"));
+    }
+
+    #[test]
+    fn test_format_task_with_dependencies() {
+        let task = create_test_task();
+        let blocked_by = vec!["dep-1".to_string(), "dep-2".to_string()];
+        let output = format_task_with_deps(&task, &blocked_by);
+
+        assert!(output.contains("id: test-proj-task-1"));
+        assert!(output.contains("blocked_by: dep-1, dep-2"));
+    }
+
+    #[test]
+    fn test_format_tasks_with_dependencies() {
+        let task1 = create_test_task();
+        let mut task2 = create_test_task();
+        task2.id = "test-proj-task-2".to_string();
+        task2.title = "Task 2".to_string();
+
+        let blocked_by1: &[String] = &["blocker-1".to_string()];
+        let blocked_by2: &[String] = &[];
+
+        let tasks_with_deps: Vec<(&Task, &[String])> =
+            vec![(&task1, blocked_by1), (&task2, blocked_by2)];
+        let output = format_tasks_with_deps(&tasks_with_deps);
+
+        // First task should show blocked
+        assert!(output.contains("test-proj-task-1"));
+        assert!(output.contains("[BLOCKED]"));
+        assert!(output.contains("blocked_by: blocker-1"));
+
+        // Second task should not show blocked
+        assert!(output.contains("test-proj-task-2"));
+    }
+
+    #[test]
+    fn test_format_task_with_deps_shows_blocked_by_line() {
+        let task = create_test_task();
+        let blocked_by = vec!["dependency-task".to_string()];
+        let output = format_task_with_deps(&task, &blocked_by);
+
+        // Verify the blocked_by line appears in the output
+        assert!(output.contains("blocked_by: dependency-task"));
+        // And it should be between the task tags
+        assert!(output.starts_with("<task>"));
+        assert!(output.ends_with("</task>\n"));
+    }
 }

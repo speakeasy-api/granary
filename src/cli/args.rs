@@ -285,6 +285,50 @@ pub enum Commands {
         #[arg(long)]
         to: Option<String>,
     },
+
+    /// List all workers
+    Workers {
+        /// Include stopped/errored workers
+        #[arg(long)]
+        all: bool,
+    },
+
+    /// Manage a specific worker
+    Worker {
+        #[command(subcommand)]
+        command: WorkerCommand,
+    },
+
+    /// List all runs
+    Runs {
+        /// Filter by worker ID
+        #[arg(long)]
+        worker: Option<String>,
+
+        /// Filter by status (pending, running, completed, failed, paused, cancelled)
+        #[arg(long)]
+        status: Option<String>,
+
+        /// Include completed/failed/cancelled runs
+        #[arg(long)]
+        all: bool,
+
+        /// Maximum number of runs to show
+        #[arg(long, default_value = "50")]
+        limit: u32,
+    },
+
+    /// Manage a specific run
+    Run {
+        #[command(subcommand)]
+        command: RunCommand,
+    },
+
+    /// Manage the granary daemon
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -411,7 +455,7 @@ pub enum TaskAction {
         #[arg(long)]
         description: Option<String>,
 
-        /// New status (todo, in_progress, done, blocked)
+        /// New status (draft, todo, in_progress, done, blocked)
         #[arg(long)]
         status: Option<String>,
 
@@ -431,6 +475,9 @@ pub enum TaskAction {
         #[arg(long)]
         due: Option<String>,
     },
+
+    /// Mark a draft task as ready (transition Draft -> Todo)
+    Ready,
 
     /// Start working on task
     Start {
@@ -698,6 +745,82 @@ pub enum ConfigAction {
         /// Config key
         key: String,
     },
+
+    /// Open global config file (~/.granary/config.toml) in $EDITOR
+    Edit,
+
+    /// Manage global runners configuration
+    Runners {
+        #[command(subcommand)]
+        action: Option<RunnersAction>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RunnersAction {
+    /// Add or update a runner configuration
+    Add {
+        /// Runner name
+        name: String,
+
+        /// Command to execute
+        #[arg(long)]
+        command: String,
+
+        /// Arguments (can be specified multiple times)
+        #[arg(long = "arg", short = 'a')]
+        args: Vec<String>,
+
+        /// Maximum concurrent executions
+        #[arg(long)]
+        concurrency: Option<u32>,
+
+        /// Default event type this runner responds to
+        #[arg(long)]
+        on: Option<String>,
+
+        /// Environment variables (KEY=VALUE format, can be specified multiple times)
+        #[arg(long = "env", short = 'e')]
+        env_vars: Vec<String>,
+    },
+
+    /// Update an existing runner
+    Update {
+        /// Runner name
+        name: String,
+
+        /// New command to execute
+        #[arg(long)]
+        command: Option<String>,
+
+        /// Arguments (replaces existing if provided)
+        #[arg(long = "arg", short = 'a')]
+        args: Option<Vec<String>>,
+
+        /// Maximum concurrent executions
+        #[arg(long)]
+        concurrency: Option<u32>,
+
+        /// Default event type this runner responds to
+        #[arg(long)]
+        on: Option<String>,
+
+        /// Environment variables (KEY=VALUE format, replaces existing if provided)
+        #[arg(long = "env", short = 'e')]
+        env_vars: Option<Vec<String>>,
+    },
+
+    /// Remove a runner configuration
+    Rm {
+        /// Runner name
+        name: String,
+    },
+
+    /// Show a specific runner configuration
+    Show {
+        /// Runner name
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -820,4 +943,142 @@ pub enum InitiativeAction {
     /// Show a high-level summary of the initiative.
     /// Includes progress, blockers, and next actions.
     Summary,
+}
+
+#[derive(Subcommand)]
+pub enum WorkerCommand {
+    /// Start a new worker
+    Start {
+        /// Runner name from config
+        #[arg(long)]
+        runner: Option<String>,
+
+        /// Inline command to execute
+        #[arg(long)]
+        command: Option<String>,
+
+        /// Command arguments (can be specified multiple times)
+        #[arg(long = "arg", short = 'a')]
+        args: Vec<String>,
+
+        /// Event type to subscribe to (uses runner's default if not specified)
+        #[arg(long)]
+        on: Option<String>,
+
+        /// Filter expressions (can be specified multiple times)
+        #[arg(long = "filter", short = 'f')]
+        filters: Vec<String>,
+
+        /// Run in background as daemon
+        #[arg(long, short = 'd')]
+        detached: bool,
+
+        /// Maximum concurrent runner instances
+        #[arg(long, default_value = "1")]
+        concurrency: u32,
+
+        /// Cooldown in seconds for polled events like task.next (default: 300 = 5 minutes)
+        #[arg(long, default_value = "300")]
+        poll_cooldown: i64,
+    },
+
+    /// Show worker status
+    Status {
+        /// Worker ID
+        worker_id: String,
+    },
+
+    /// View worker logs
+    Logs {
+        /// Worker ID
+        worker_id: String,
+
+        /// Follow log output (like tail -f)
+        #[arg(long, short = 'f')]
+        follow: bool,
+
+        /// Number of lines to show from the end
+        #[arg(long, short = 'n', default_value = "50")]
+        lines: usize,
+    },
+
+    /// Stop a worker
+    Stop {
+        /// Worker ID
+        worker_id: String,
+
+        /// Also stop/cancel all active runs
+        #[arg(long)]
+        runs: bool,
+    },
+
+    /// Remove stopped/errored workers
+    Prune,
+}
+
+#[derive(Subcommand)]
+pub enum RunCommand {
+    /// Show run status and details
+    Status {
+        /// Run ID
+        run_id: String,
+    },
+
+    /// View run logs
+    Logs {
+        /// Run ID
+        run_id: String,
+
+        /// Follow log output (like tail -f)
+        #[arg(long, short = 'f')]
+        follow: bool,
+
+        /// Number of lines to show from the end
+        #[arg(long, short = 'n', default_value = "100")]
+        lines: usize,
+    },
+
+    /// Stop a running run
+    Stop {
+        /// Run ID
+        run_id: String,
+    },
+
+    /// Pause a running run (sends SIGSTOP)
+    Pause {
+        /// Run ID
+        run_id: String,
+    },
+
+    /// Resume a paused run (sends SIGCONT)
+    Resume {
+        /// Run ID
+        run_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DaemonCommand {
+    /// Show daemon status
+    Status,
+
+    /// Start the daemon (if not running)
+    Start,
+
+    /// Stop the daemon
+    Stop,
+
+    /// Restart the daemon
+    Restart,
+
+    /// Show daemon logs
+    Logs {
+        /// Follow log output
+        #[arg(short, long)]
+        follow: bool,
+
+        /// Number of lines to show
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: usize,
+    },
 }

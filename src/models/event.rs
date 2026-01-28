@@ -21,6 +21,10 @@ pub enum EventType {
     TaskClaimed,
     TaskReleased,
 
+    // Polled events (not persisted, generated on-demand)
+    TaskNext,    // Emitted when a task becomes available for work
+    ProjectNext, // Emitted when a project becomes available for work
+
     // Dependency events
     DependencyAdded,
     DependencyRemoved,
@@ -64,6 +68,8 @@ impl EventType {
             EventType::TaskUnblocked => "task.unblocked".to_string(),
             EventType::TaskClaimed => "task.claimed".to_string(),
             EventType::TaskReleased => "task.released".to_string(),
+            EventType::TaskNext => "task.next".to_string(),
+            EventType::ProjectNext => "project.next".to_string(),
             EventType::DependencyAdded => "dependency.added".to_string(),
             EventType::DependencyRemoved => "dependency.removed".to_string(),
             EventType::CommentCreated => "comment.created".to_string(),
@@ -100,6 +106,8 @@ impl std::str::FromStr for EventType {
             "task.unblocked" => EventType::TaskUnblocked,
             "task.claimed" => EventType::TaskClaimed,
             "task.released" => EventType::TaskReleased,
+            "task.next" => EventType::TaskNext,
+            "project.next" => EventType::ProjectNext,
             "dependency.added" => EventType::DependencyAdded,
             "dependency.removed" => EventType::DependencyRemoved,
             "comment.created" => EventType::CommentCreated,
@@ -172,10 +180,6 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn event_type_enum(&self) -> EventType {
-        self.event_type.parse().unwrap()
-    }
-
     pub fn entity_type_enum(&self) -> Option<EntityType> {
         self.entity_type.parse().ok()
     }

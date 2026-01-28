@@ -103,6 +103,25 @@ impl Workspace {
         })
     }
 
+    /// Open an existing workspace at the specified path.
+    ///
+    /// Unlike `find()`, this does not walk up the directory tree.
+    /// The path should be the root directory containing `.granary/`.
+    pub fn open(root: impl AsRef<Path>) -> Result<Self> {
+        let root = root.as_ref().to_path_buf();
+        let granary_dir = root.join(WORKSPACE_DIR);
+
+        if !granary_dir.exists() {
+            return Err(GranaryError::WorkspaceNotFound);
+        }
+
+        Ok(Self {
+            root,
+            granary_dir: granary_dir.clone(),
+            db_path: granary_dir.join(DB_FILE),
+        })
+    }
+
     /// Initialize the database and run migrations
     pub async fn init_db(&self) -> Result<SqlitePool> {
         let pool = create_pool(&self.db_path).await?;

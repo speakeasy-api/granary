@@ -3,14 +3,18 @@ pub mod batch;
 pub mod checkpoints;
 pub mod comments;
 pub mod config;
+pub mod daemon;
 pub mod init;
 pub mod initiatives;
 pub mod projects;
+pub mod run;
 pub mod search;
 pub mod sessions;
 pub mod show;
 pub mod summary;
 pub mod tasks;
 pub mod update;
+pub mod worker;
+pub mod workers;
 
 pub use args::*;

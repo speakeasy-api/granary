@@ -90,6 +90,33 @@ pub mod projects {
                 .await?;
         Ok(result.rows_affected() > 0)
     }
+
+    /// List projects that have at least one available (next) task.
+    /// A project is 'available' if it has tasks that are:
+    /// - Status is 'todo' or 'in_progress'
+    /// - Not blocked (blocked_reason IS NULL)
+    /// - All dependencies are done
+    pub async fn list_with_available_tasks(pool: &SqlitePool) -> Result<Vec<Project>> {
+        let projects = sqlx::query_as::<_, Project>(
+            r#"
+            SELECT DISTINCT p.* FROM projects p
+            INNER JOIN tasks t ON t.project_id = p.id
+            WHERE p.status = 'active'
+              AND t.status IN ('todo', 'in_progress')
+              AND t.blocked_reason IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM task_dependencies td
+                  JOIN tasks dep ON dep.id = td.depends_on_task_id
+                  WHERE td.task_id = t.id
+                    AND dep.status != 'done'
+              )
+            ORDER BY p.name ASC
+            "#,
+        )
+        .fetch_all(pool)
+        .await?;
+        Ok(projects)
+    }
 }
 
 /// Database operations for initiatives
@@ -482,7 +509,7 @@ pub mod tasks {
         project_ids: Option<&[String]>,
     ) -> Result<Option<Task>> {
         // Build query for next task:
-        // 1. Status is todo or in_progress
+        // 1. Status is todo or in_progress (NOT draft)
         // 2. Not blocked
         // 3. All dependencies are done
         // 4. Order by priority, due_at, created_at
@@ -542,11 +569,13 @@ pub mod tasks {
     }
 
     /// Get all actionable tasks (next tasks without limit)
+    /// Draft tasks are excluded from actionable tasks
     pub async fn get_all_next(
         pool: &SqlitePool,
         project_ids: Option<&[String]>,
     ) -> Result<Vec<Task>> {
         // Same query as get_next but without LIMIT 1
+        // Draft tasks are excluded (only 'todo' and 'in_progress' are actionable)
         let base_query = r#"
             SELECT t.*
             FROM tasks t
@@ -1111,6 +1140,37 @@ pub mod events {
         .await?;
         Ok(events)
     }
+
+    /// List events since a specific event ID (exclusive)
+    ///
+    /// This is used for cursor-based event polling. Returns events with IDs
+    /// greater than the specified ID, ordered by ID ascending.
+    pub async fn list_since_id(pool: &SqlitePool, since_id: i64) -> Result<Vec<Event>> {
+        let events =
+            sqlx::query_as::<_, Event>("SELECT * FROM events WHERE id > ? ORDER BY id ASC")
+                .bind(since_id)
+                .fetch_all(pool)
+                .await?;
+        Ok(events)
+    }
+
+    /// List events since a specific event ID, filtered by event type
+    ///
+    /// This is more efficient than fetching all events and filtering in memory.
+    pub async fn list_since_id_by_type(
+        pool: &SqlitePool,
+        since_id: i64,
+        event_type: &str,
+    ) -> Result<Vec<Event>> {
+        let events = sqlx::query_as::<_, Event>(
+            "SELECT * FROM events WHERE id > ? AND event_type = ? ORDER BY id ASC",
+        )
+        .bind(since_id)
+        .bind(event_type)
+        .fetch_all(pool)
+        .await?;
+        Ok(events)
+    }
 }
 
 /// Database operations for artifacts
@@ -1658,5 +1718,500 @@ pub mod initiative_tasks {
         .await?;
 
         Ok(tasks)
+    }
+}
+
+/// Database operations for workers
+/// Workers are stored in a GLOBAL database (~/.granary/workers.db)
+pub mod workers {
+    use super::*;
+    use crate::models::ids::generate_worker_id;
+    use crate::models::worker::{CreateWorker, UpdateWorkerStatus, Worker, WorkerStatus};
+
+    /// Create a new worker record
+    pub async fn create(pool: &SqlitePool, input: &CreateWorker) -> Result<Worker> {
+        let id = generate_worker_id();
+        let now = chrono::Utc::now().to_rfc3339();
+        let args_json = serde_json::to_string(&input.args)?;
+        let filters_json = serde_json::to_string(&input.filters)?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO workers (id, runner_name, command, args, event_type, filters,
+                concurrency, instance_path, status, poll_cooldown_secs, detached, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&id)
+        .bind(&input.runner_name)
+        .bind(&input.command)
+        .bind(&args_json)
+        .bind(&input.event_type)
+        .bind(&filters_json)
+        .bind(input.concurrency)
+        .bind(&input.instance_path)
+        .bind(input.poll_cooldown_secs)
+        .bind(input.detached)
+        .bind(&now)
+        .bind(&now)
+        .execute(pool)
+        .await?;
+
+        // Fetch and return the created worker
+        get(pool, &id).await?.ok_or_else(|| {
+            crate::error::GranaryError::Conflict(
+                "Failed to create worker: could not retrieve after insert".to_string(),
+            )
+        })
+    }
+
+    /// Column list for Worker queries (must match Worker struct field order)
+    const WORKER_COLUMNS: &str = r#"
+        id, runner_name, command, args, event_type, filters, concurrency,
+        instance_path, status, error_message, pid, detached, created_at,
+        updated_at, stopped_at, poll_cooldown_secs, last_event_id
+    "#;
+
+    /// Get a worker by ID
+    pub async fn get(pool: &SqlitePool, id: &str) -> Result<Option<Worker>> {
+        let query = format!("SELECT {} FROM workers WHERE id = ?", WORKER_COLUMNS);
+        let worker = sqlx::query_as::<_, Worker>(&query)
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+        Ok(worker)
+    }
+
+    /// List all workers (global registry)
+    pub async fn list(pool: &SqlitePool) -> Result<Vec<Worker>> {
+        let query = format!(
+            "SELECT {} FROM workers ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query).fetch_all(pool).await?;
+        Ok(workers)
+    }
+
+    /// List workers by status
+    pub async fn list_by_status(pool: &SqlitePool, status: WorkerStatus) -> Result<Vec<Worker>> {
+        let query = format!(
+            "SELECT {} FROM workers WHERE status = ? ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query)
+            .bind(status.as_str())
+            .fetch_all(pool)
+            .await?;
+        Ok(workers)
+    }
+
+    /// List workers for a specific workspace/instance
+    pub async fn list_by_instance(pool: &SqlitePool, instance_path: &str) -> Result<Vec<Worker>> {
+        let query = format!(
+            "SELECT {} FROM workers WHERE instance_path = ? ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query)
+            .bind(instance_path)
+            .fetch_all(pool)
+            .await?;
+        Ok(workers)
+    }
+
+    /// List workers by event type
+    pub async fn list_by_event_type(pool: &SqlitePool, event_type: &str) -> Result<Vec<Worker>> {
+        let query = format!(
+            "SELECT {} FROM workers WHERE event_type = ? ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query)
+            .bind(event_type)
+            .fetch_all(pool)
+            .await?;
+        Ok(workers)
+    }
+
+    /// Update worker status (and optionally error message and pid)
+    pub async fn update_status(
+        pool: &SqlitePool,
+        id: &str,
+        update: &UpdateWorkerStatus,
+    ) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let stopped_at = if matches!(update.status, WorkerStatus::Stopped | WorkerStatus::Error) {
+            Some(now.clone())
+        } else {
+            None
+        };
+
+        let result = sqlx::query(
+            r#"
+            UPDATE workers
+            SET status = ?, error_message = ?, pid = ?, stopped_at = ?, updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(update.status.as_str())
+        .bind(&update.error_message)
+        .bind(update.pid)
+        .bind(&stopped_at)
+        .bind(&now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Update worker PID (when worker starts running)
+    pub async fn update_pid(pool: &SqlitePool, id: &str, pid: i64) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let result = sqlx::query(
+            "UPDATE workers SET pid = ?, status = 'running', updated_at = ? WHERE id = ?",
+        )
+        .bind(pid)
+        .bind(&now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Delete a worker record
+    pub async fn delete(pool: &SqlitePool, id: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM workers WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Delete all workers for a specific workspace/instance
+    pub async fn delete_by_instance(pool: &SqlitePool, instance_path: &str) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM workers WHERE instance_path = ?")
+            .bind(instance_path)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Get running workers (for health checks)
+    pub async fn get_running(pool: &SqlitePool) -> Result<Vec<Worker>> {
+        let query = format!(
+            "SELECT {} FROM workers WHERE status = 'running' ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query).fetch_all(pool).await?;
+        Ok(workers)
+    }
+
+    /// List active workers (running or pending)
+    ///
+    /// This is used by WorkerManager to filter out stopped/errored workers.
+    pub async fn list_active(pool: &SqlitePool) -> Result<Vec<Worker>> {
+        let query = format!(
+            "SELECT {} FROM workers WHERE status IN ('running', 'pending') ORDER BY created_at DESC",
+            WORKER_COLUMNS
+        );
+        let workers = sqlx::query_as::<_, Worker>(&query).fetch_all(pool).await?;
+        Ok(workers)
+    }
+
+    /// Count workers by status
+    pub async fn count_by_status(pool: &SqlitePool, status: WorkerStatus) -> Result<i64> {
+        let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workers WHERE status = ?")
+            .bind(status.as_str())
+            .fetch_one(pool)
+            .await?;
+        Ok(count)
+    }
+
+    /// Update the last_event_id cursor for a worker
+    ///
+    /// This is used for event polling to track which events have been processed.
+    pub async fn update_cursor(pool: &SqlitePool, id: &str, last_event_id: i64) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let result =
+            sqlx::query("UPDATE workers SET last_event_id = ?, updated_at = ? WHERE id = ?")
+                .bind(last_event_id)
+                .bind(&now)
+                .bind(id)
+                .execute(pool)
+                .await?;
+        Ok(result.rows_affected() > 0)
+    }
+}
+
+/// Database operations for runs
+/// Runs are stored in the same GLOBAL database as workers (~/.granary/workers.db)
+pub mod runs {
+    use super::*;
+    use crate::models::ids::generate_run_id;
+    use crate::models::run::{CreateRun, Run, RunStatus, ScheduleRetry, UpdateRunStatus};
+
+    /// Create a new run record
+    pub async fn create(pool: &SqlitePool, input: &CreateRun) -> Result<Run> {
+        let id = generate_run_id();
+        let now = chrono::Utc::now().to_rfc3339();
+        let args_json = serde_json::to_string(&input.args)?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO runs (id, worker_id, event_id, event_type, entity_id, command, args,
+                status, attempt, max_attempts, log_path, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&id)
+        .bind(&input.worker_id)
+        .bind(input.event_id)
+        .bind(&input.event_type)
+        .bind(&input.entity_id)
+        .bind(&input.command)
+        .bind(&args_json)
+        .bind(input.max_attempts)
+        .bind(&input.log_path)
+        .bind(&now)
+        .bind(&now)
+        .execute(pool)
+        .await?;
+
+        // Fetch and return the created run
+        get(pool, &id).await?.ok_or_else(|| {
+            crate::error::GranaryError::Conflict(
+                "Failed to create run: could not retrieve after insert".to_string(),
+            )
+        })
+    }
+
+    /// Get a run by ID
+    pub async fn get(pool: &SqlitePool, id: &str) -> Result<Option<Run>> {
+        let run = sqlx::query_as::<_, Run>("SELECT * FROM runs WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+        Ok(run)
+    }
+
+    /// List all runs for a worker
+    pub async fn list_by_worker(pool: &SqlitePool, worker_id: &str) -> Result<Vec<Run>> {
+        let runs = sqlx::query_as::<_, Run>(
+            "SELECT * FROM runs WHERE worker_id = ? ORDER BY created_at DESC",
+        )
+        .bind(worker_id)
+        .fetch_all(pool)
+        .await?;
+        Ok(runs)
+    }
+
+    /// List all runs (global list)
+    pub async fn list_all(pool: &SqlitePool) -> Result<Vec<Run>> {
+        let runs = sqlx::query_as::<_, Run>("SELECT * FROM runs ORDER BY created_at DESC")
+            .fetch_all(pool)
+            .await?;
+        Ok(runs)
+    }
+
+    /// List runs pending retry (where next_retry_at is before the given time)
+    pub async fn list_pending_retries(pool: &SqlitePool, before_time: &str) -> Result<Vec<Run>> {
+        let runs = sqlx::query_as::<_, Run>(
+            r#"
+            SELECT * FROM runs
+            WHERE status = 'pending'
+              AND attempt > 1
+              AND next_retry_at IS NOT NULL
+              AND next_retry_at <= ?
+            ORDER BY next_retry_at ASC
+            "#,
+        )
+        .bind(before_time)
+        .fetch_all(pool)
+        .await?;
+        Ok(runs)
+    }
+
+    /// Count running runs for a worker (for concurrency check)
+    pub async fn count_running_by_worker(pool: &SqlitePool, worker_id: &str) -> Result<i64> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM runs WHERE worker_id = ? AND status = 'running'",
+        )
+        .bind(worker_id)
+        .fetch_one(pool)
+        .await?;
+        Ok(count)
+    }
+
+    /// Update run status (and optionally exit_code, error_message, pid)
+    pub async fn update_status(
+        pool: &SqlitePool,
+        id: &str,
+        update: &UpdateRunStatus,
+    ) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Determine started_at and completed_at based on status
+        let (started_at, completed_at) = match update.status {
+            RunStatus::Running => (Some(now.clone()), None),
+            RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled => {
+                (None, Some(now.clone()))
+            }
+            _ => (None, None),
+        };
+
+        let result = sqlx::query(
+            r#"
+            UPDATE runs
+            SET status = ?, exit_code = ?, error_message = ?, pid = ?,
+                started_at = COALESCE(?, started_at),
+                completed_at = COALESCE(?, completed_at),
+                updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(update.status.as_str())
+        .bind(update.exit_code)
+        .bind(&update.error_message)
+        .bind(update.pid)
+        .bind(&started_at)
+        .bind(&completed_at)
+        .bind(&now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Schedule a retry for a run
+    pub async fn update_for_retry(
+        pool: &SqlitePool,
+        id: &str,
+        retry: &ScheduleRetry,
+    ) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let result = sqlx::query(
+            r#"
+            UPDATE runs
+            SET status = 'pending', next_retry_at = ?, attempt = ?, updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&retry.next_retry_at)
+        .bind(retry.attempt)
+        .bind(&now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Cancel all runs for a worker
+    pub async fn cancel_by_worker(pool: &SqlitePool, worker_id: &str) -> Result<u64> {
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let result = sqlx::query(
+            r#"
+            UPDATE runs
+            SET status = 'cancelled', completed_at = ?, updated_at = ?
+            WHERE worker_id = ? AND status IN ('pending', 'running', 'paused')
+            "#,
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(worker_id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// List runs by status
+    pub async fn list_by_status(pool: &SqlitePool, status: RunStatus) -> Result<Vec<Run>> {
+        let runs = sqlx::query_as::<_, Run>(
+            "SELECT * FROM runs WHERE status = ? ORDER BY created_at DESC",
+        )
+        .bind(status.as_str())
+        .fetch_all(pool)
+        .await?;
+        Ok(runs)
+    }
+
+    /// Delete a run record
+    pub async fn delete(pool: &SqlitePool, id: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM runs WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Delete all runs for a worker
+    pub async fn delete_by_worker(pool: &SqlitePool, worker_id: &str) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM runs WHERE worker_id = ?")
+            .bind(worker_id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Get pending runs (not yet started, not retries)
+    pub async fn get_pending(pool: &SqlitePool, worker_id: &str) -> Result<Vec<Run>> {
+        let runs = sqlx::query_as::<_, Run>(
+            r#"
+            SELECT * FROM runs
+            WHERE worker_id = ? AND status = 'pending' AND attempt = 1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(worker_id)
+        .fetch_all(pool)
+        .await?;
+        Ok(runs)
+    }
+
+    /// Count runs by status for a worker
+    pub async fn count_by_status_for_worker(
+        pool: &SqlitePool,
+        worker_id: &str,
+        status: RunStatus,
+    ) -> Result<i64> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM runs WHERE worker_id = ? AND status = ?",
+        )
+        .bind(worker_id)
+        .bind(status.as_str())
+        .fetch_one(pool)
+        .await?;
+        Ok(count)
+    }
+
+    /// List active runs (pending, running, paused)
+    ///
+    /// This is used by WorkerManager to get runs that are still in progress.
+    pub async fn list_active(pool: &SqlitePool) -> Result<Vec<Run>> {
+        let runs = sqlx::query_as::<_, Run>(
+            "SELECT * FROM runs WHERE status IN ('pending', 'running', 'paused') ORDER BY created_at DESC",
+        )
+        .fetch_all(pool)
+        .await?;
+        Ok(runs)
+    }
+
+    /// List runs for a specific worker filtered by status
+    pub async fn list_by_worker_and_status(
+        pool: &SqlitePool,
+        worker_id: &str,
+        status: RunStatus,
+    ) -> Result<Vec<Run>> {
+        let runs = sqlx::query_as::<_, Run>(
+            "SELECT * FROM runs WHERE worker_id = ? AND status = ? ORDER BY created_at DESC",
+        )
+        .bind(worker_id)
+        .bind(status.as_str())
+        .fetch_all(pool)
+        .await?;
+        Ok(runs)
     }
 }

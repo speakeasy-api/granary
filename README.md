@@ -155,6 +155,9 @@ granary context       # Export context pack for LLM
 granary handoff       # Generate handoff for sub-agent
 granary checkpoint    # Create/restore checkpoints
 granary search        # Search projects and tasks by title
+granary workers       # List all workers
+granary worker start  # Start a new event-driven worker
+granary runs          # List all runner executions
 ```
 
 Use `granary --help` or `granary <command> --help` for detailed usage.
@@ -188,6 +191,24 @@ granary context --format prompt --token-budget 2000
 # Handoff to a review agent
 granary handoff --to "Code Review Agent" --tasks task-1,task-2
 ```
+
+## Workers (Event-driven Automation)
+
+Workers are long-running processes that subscribe to granary events and automatically spawn commands. For example, automatically run Claude Code when tasks become unblocked:
+
+```sh
+# Configure a runner
+granary config runners add claude \
+  --command "claude" \
+  --arg "--print" \
+  --arg "--message" \
+  --arg "Execute task {task.id}"
+
+# Start a worker
+granary worker start --runner claude --on task.unblocked
+```
+
+See [docs/workers.md](docs/workers.md) for complete documentation on workers, runners, filters, and template substitution.
 
 ## License
 

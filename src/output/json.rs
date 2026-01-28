@@ -4,6 +4,29 @@ use serde_json::json;
 use crate::models::initiative::Initiative;
 use crate::models::*;
 
+/// Task output with dependency information
+/// This enriched struct includes the blocked_by field that shows unmet dependencies
+#[derive(Serialize)]
+pub struct TaskOutput {
+    #[serde(flatten)]
+    pub task: Task,
+    /// List of task IDs that block this task (unmet dependencies)
+    pub blocked_by: Vec<String>,
+}
+
+impl TaskOutput {
+    pub fn new(task: Task, blocked_by: Vec<String>) -> Self {
+        Self { task, blocked_by }
+    }
+
+    pub fn from_task(task: Task) -> Self {
+        Self {
+            task,
+            blocked_by: vec![],
+        }
+    }
+}
+
 pub fn format_project(project: &Project) -> String {
     serde_json::to_string_pretty(project).unwrap_or_else(|_| "{}".to_string())
 }
@@ -13,11 +36,29 @@ pub fn format_projects(projects: &[Project]) -> String {
 }
 
 pub fn format_task(task: &Task) -> String {
-    serde_json::to_string_pretty(task).unwrap_or_else(|_| "{}".to_string())
+    let output = TaskOutput::from_task(task.clone());
+    serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
+}
+
+pub fn format_task_with_deps(task: &Task, blocked_by: Vec<String>) -> String {
+    let output = TaskOutput::new(task.clone(), blocked_by);
+    serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
 }
 
 pub fn format_tasks(tasks: &[Task]) -> String {
-    serde_json::to_string_pretty(tasks).unwrap_or_else(|_| "[]".to_string())
+    let outputs: Vec<TaskOutput> = tasks
+        .iter()
+        .map(|t| TaskOutput::from_task(t.clone()))
+        .collect();
+    serde_json::to_string_pretty(&outputs).unwrap_or_else(|_| "[]".to_string())
+}
+
+pub fn format_tasks_with_deps(tasks_with_deps: &[(Task, Vec<String>)]) -> String {
+    let outputs: Vec<TaskOutput> = tasks_with_deps
+        .iter()
+        .map(|(t, deps)| TaskOutput::new(t.clone(), deps.clone()))
+        .collect();
+    serde_json::to_string_pretty(&outputs).unwrap_or_else(|_| "[]".to_string())
 }
 
 pub fn format_comment(comment: &Comment) -> String {
@@ -204,4 +245,162 @@ use crate::models::initiative::InitiativeSummary;
 
 pub fn format_initiative_summary(summary: &InitiativeSummary) -> String {
     serde_json::to_string_pretty(summary).unwrap_or_else(|_| "{}".to_string())
+}
+
+// === Worker formatting ===
+
+use crate::models::worker::Worker;
+
+pub fn format_worker(worker: &Worker) -> String {
+    serde_json::to_string_pretty(worker).unwrap_or_else(|_| "{}".to_string())
+}
+
+pub fn format_workers(workers: &[Worker]) -> String {
+    serde_json::to_string_pretty(workers).unwrap_or_else(|_| "[]".to_string())
+}
+
+// === Run formatting ===
+
+use crate::models::run::Run;
+
+pub fn format_run(run: &Run) -> String {
+    serde_json::to_string_pretty(run).unwrap_or_else(|_| "{}".to_string())
+}
+
+pub fn format_runs(runs: &[Run]) -> String {
+    serde_json::to_string_pretty(runs).unwrap_or_else(|_| "[]".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_task() -> Task {
+        Task {
+            id: "test-proj-task-1".to_string(),
+            project_id: "test-proj".to_string(),
+            task_number: 1,
+            parent_task_id: None,
+            title: "Test Task".to_string(),
+            description: Some("A test task description".to_string()),
+            status: "todo".to_string(),
+            priority: "P1".to_string(),
+            owner: Some("test-user".to_string()),
+            tags: None,
+            blocked_reason: None,
+            started_at: None,
+            completed_at: None,
+            due_at: None,
+            claim_owner: None,
+            claim_claimed_at: None,
+            claim_lease_expires_at: None,
+            pinned: 0,
+            focus_weight: 0,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            version: 1,
+        }
+    }
+
+    #[test]
+    fn test_task_output_with_no_dependencies() {
+        let task = create_test_task();
+        let output = format_task(&task);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        // Should have blocked_by as empty array, not null
+        assert!(parsed.get("blocked_by").is_some());
+        assert!(parsed["blocked_by"].is_array());
+        assert_eq!(parsed["blocked_by"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_task_output_with_one_dependency() {
+        let task = create_test_task();
+        let blocked_by = vec!["dep-task-1".to_string()];
+        let output = format_task_with_deps(&task, blocked_by);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert!(parsed["blocked_by"].is_array());
+        let deps = parsed["blocked_by"].as_array().unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].as_str().unwrap(), "dep-task-1");
+    }
+
+    #[test]
+    fn test_task_output_with_multiple_dependencies() {
+        let task = create_test_task();
+        let blocked_by = vec![
+            "dep-task-1".to_string(),
+            "dep-task-2".to_string(),
+            "dep-task-3".to_string(),
+        ];
+        let output = format_task_with_deps(&task, blocked_by);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        let deps = parsed["blocked_by"].as_array().unwrap();
+        assert_eq!(deps.len(), 3);
+        assert_eq!(deps[0].as_str().unwrap(), "dep-task-1");
+        assert_eq!(deps[1].as_str().unwrap(), "dep-task-2");
+        assert_eq!(deps[2].as_str().unwrap(), "dep-task-3");
+    }
+
+    #[test]
+    fn test_tasks_output_includes_blocked_by() {
+        let task1 = create_test_task();
+        let mut task2 = create_test_task();
+        task2.id = "test-proj-task-2".to_string();
+        task2.task_number = 2;
+
+        let tasks = vec![task1, task2];
+        let output = format_tasks(&tasks);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        // Each task should have blocked_by array
+        assert!(parsed.is_array());
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+
+        for item in arr {
+            assert!(item.get("blocked_by").is_some());
+            assert!(item["blocked_by"].is_array());
+        }
+    }
+
+    #[test]
+    fn test_tasks_with_deps_output() {
+        let task1 = create_test_task();
+        let mut task2 = create_test_task();
+        task2.id = "test-proj-task-2".to_string();
+        task2.task_number = 2;
+
+        let tasks_with_deps = vec![(task1, vec!["blocker-1".to_string()]), (task2, vec![])];
+        let output = format_tasks_with_deps(&tasks_with_deps);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+
+        // First task has one blocker
+        assert_eq!(arr[0]["blocked_by"].as_array().unwrap().len(), 1);
+        assert_eq!(arr[0]["blocked_by"][0].as_str().unwrap(), "blocker-1");
+
+        // Second task has no blockers
+        assert_eq!(arr[1]["blocked_by"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_task_output_preserves_all_fields() {
+        let task = create_test_task();
+        let output = format_task(&task);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        // Verify task fields are preserved
+        assert_eq!(parsed["id"].as_str().unwrap(), "test-proj-task-1");
+        assert_eq!(parsed["title"].as_str().unwrap(), "Test Task");
+        assert_eq!(parsed["status"].as_str().unwrap(), "todo");
+        assert_eq!(parsed["priority"].as_str().unwrap(), "P1");
+        assert_eq!(parsed["project_id"].as_str().unwrap(), "test-proj");
+        assert_eq!(parsed["owner"].as_str().unwrap(), "test-user");
+    }
 }

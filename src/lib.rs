@@ -5,6 +5,7 @@
 //! on demand.
 
 pub mod cli;
+pub mod daemon;
 pub mod db;
 pub mod error;
 pub mod models;
