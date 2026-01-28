@@ -103,7 +103,7 @@ get_latest_version() {
 
     # Extract all tag names and find first non-prerelease
     version=""
-    for tag in $(echo "$releases" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'); do
+    for tag in $(echo "$releases" | grep '"tag_name":' | cut -d'"' -f4); do
         if ! is_prerelease "$tag"; then
             version="$tag"
             break
