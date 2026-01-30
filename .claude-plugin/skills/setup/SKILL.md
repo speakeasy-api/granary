@@ -19,10 +19,10 @@ If not installed, direct the user to install it:
 
 ```bash
 # macOS/Linux
-curl -fsSL https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.sh | sh
 
 # Windows PowerShell
-irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.ps1 | iex
 ```
 
 ## 2. Initialize Workspace

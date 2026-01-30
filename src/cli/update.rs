@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{GranaryError, Result};
 
-const GITHUB_REPO: &str = "danielkov/granary";
+const GITHUB_REPO: &str = "speakeasy-api/granary";
 const CACHE_TTL_HOURS: i64 = 24;
 
 #[derive(Deserialize, Clone)]
@@ -189,7 +189,7 @@ fn run_install_script(version: Option<&str>) -> Result<()> {
     {
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
-            .arg("curl -sSfL https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.sh | sh");
+            .arg("curl -sSfL https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.sh | sh");
 
         // Set GRANARY_VERSION env var if a specific version is requested
         if let Some(v) = version {
@@ -209,11 +209,11 @@ fn run_install_script(version: Option<&str>) -> Result<()> {
     {
         let script = if let Some(v) = version {
             format!(
-                "$env:GRANARY_VERSION='{}'; irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex",
+                "$env:GRANARY_VERSION='{}'; irm https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.ps1 | iex",
                 v
             )
         } else {
-            "irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex"
+            "irm https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.ps1 | iex"
                 .to_string()
         };
 

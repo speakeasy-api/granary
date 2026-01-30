@@ -1,10 +1,10 @@
 #!/bin/sh
 # Granary installation script for Unix-like systems (macOS, Linux)
-# Usage: curl -sSfL https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.sh | sh
+# Usage: curl -sSfL https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.sh | sh
 
 set -e
 
-REPO="danielkov/granary"
+REPO="speakeasy-api/granary"
 BINARY_NAME="granary"
 INSTALL_DIR="${GRANARY_INSTALL_DIR:-$HOME/.granary/bin}"
 

@@ -15,7 +15,7 @@ A CLI context hub for agentic work. Granary supercharges your agentic workflows.
 1. Add the granary marketplace
 
 ```sh
-claude plugin marketplace add danielkov/granary
+claude plugin marketplace add speakeasy-api/granary
 ```
 
 2. Install the granary plugin from the marketplace
@@ -55,13 +55,13 @@ Use similar prompts to see Granary in action.
 ### macOS / Linux
 
 ```sh
-curl -sSfL https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.sh | sh
+curl -sSfL https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.sh | sh
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.ps1 | iex
 ```
 
 ### Installing a specific version
@@ -71,13 +71,13 @@ You can install a specific version (including pre-releases) by setting the `GRAN
 **macOS / Linux:**
 
 ```sh
-GRANARY_VERSION=0.6.2 curl -sSfL https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.sh | sh
+GRANARY_VERSION=0.6.2 curl -sSfL https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.sh | sh
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-$env:GRANARY_VERSION='0.6.2'; irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex
+$env:GRANARY_VERSION='0.6.2'; irm https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.ps1 | iex
 ```
 
 ### Updating
@@ -99,7 +99,7 @@ granary update --to=0.6.3-pre.1
 Requires [Rust](https://rustup.rs/):
 
 ```sh
-cargo install --git https://github.com/danielkov/granary.git
+cargo install --git https://github.com/speakeasy-api/granary.git
 ```
 
 ## Quick Start

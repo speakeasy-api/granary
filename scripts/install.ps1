@@ -1,9 +1,9 @@
 # Granary installation script for Windows
-# Usage: irm https://raw.githubusercontent.com/danielkov/granary/main/scripts/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.ps1 | iex
 
 $ErrorActionPreference = 'Stop'
 
-$Repo = "danielkov/granary"
+$Repo = "speakeasy-api/granary"
 $BinaryName = "granary"
 $InstallDir = if ($env:GRANARY_INSTALL_DIR) { $env:GRANARY_INSTALL_DIR } else { "$env:USERPROFILE\.granary\bin" }
 

@@ -6,7 +6,7 @@
     "name": "Daniel Kovacs <kovacsemod@gmail.com>"
   },
   "license": "MIT",
-  "repository": "https://github.com/danielkov/granary",
+  "repository": "https://github.com/speakeasy-api/granary",
   "skills": "./.claude-plugin/skills/",
   "commands": "./.claude-plugin/commands/"
 }
