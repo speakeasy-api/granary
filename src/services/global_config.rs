@@ -21,6 +21,16 @@ pub fn config_dir() -> Result<PathBuf> {
         .ok_or_else(|| GranaryError::GlobalConfig("Could not determine home directory".into()))
 }
 
+/// Check if this is the first time granary is running on this system.
+///
+/// Returns `true` if the ~/.granary directory does not exist, indicating
+/// this is a fresh installation. This check must be performed before
+/// any operations that might create the directory.
+pub fn is_first_run() -> Result<bool> {
+    let dir = config_dir()?;
+    Ok(!dir.exists())
+}
+
 /// Get the path to the global config file (~/.granary/config.toml)
 pub fn config_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("config.toml"))
@@ -289,5 +299,15 @@ mod tests {
         let path = path.unwrap();
         assert!(path.ends_with("auth.token"));
         assert!(path.parent().unwrap().ends_with("daemon"));
+    }
+
+    #[test]
+    fn test_is_first_run() {
+        // This test verifies is_first_run returns a valid result.
+        // The actual value depends on whether ~/.granary exists on the system.
+        let result = is_first_run();
+        assert!(result.is_ok());
+        // The result should be a boolean (true if ~/.granary doesn't exist)
+        let _is_first = result.unwrap();
     }
 }

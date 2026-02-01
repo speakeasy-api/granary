@@ -1,3 +1,4 @@
+pub mod agent_files;
 pub mod batch_service;
 pub mod checkpoint_service;
 pub mod event_poller;
@@ -25,6 +26,7 @@ mod template_tests;
 #[cfg(test)]
 mod worker_tests;
 
+pub use agent_files::*;
 pub use batch_service::*;
 pub use checkpoint_service::*;
 pub use event_poller::{EventPoller, EventPollerConfig, create_poller_for_worker};

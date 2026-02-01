@@ -103,7 +103,7 @@ fn print_planning_guidance(project: &Project, prior_art: &[ProjectWithProgress])
     println!("Task descriptions are the ONLY context workers receive.");
     println!();
     println!(
-        r#"  granary project {} task create "Task title" --priority P1 --description "
+        r#"  granary project {} tasks create "Task title" --priority P1 --description "
   **Goal:** What this accomplishes
 
   **Files to modify:**
