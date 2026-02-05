@@ -4,12 +4,15 @@
 //! All CRUD operations delegate to the db layer, with additional validation
 //! and error handling.
 
+use granary_types::Project;
 use sqlx::SqlitePool;
 
 use crate::db;
 use crate::error::{GranaryError, Result};
-use crate::models::Project;
-use crate::models::initiative::{CreateInitiative, Initiative, UpdateInitiative};
+use crate::models::{
+    CreateInitiative, Initiative, InitiativeBlockerInfo, InitiativeInfo, InitiativeStatusSummary,
+    InitiativeSummary, NextAction, ProjectSummary, UpdateInitiative,
+};
 use crate::services;
 
 /// Create a new initiative
@@ -132,8 +135,6 @@ pub async fn get_project_initiatives(
 
 // === Next task operations ===
 
-use crate::models::Task;
-
 /// Get the next actionable task(s) across an initiative.
 ///
 /// This respects both project-to-project dependencies and task-to-task dependencies.
@@ -149,7 +150,7 @@ pub async fn get_next_tasks(
     pool: &SqlitePool,
     initiative_id: &str,
     all: bool,
-) -> Result<Vec<Task>> {
+) -> Result<Vec<granary_types::Task>> {
     // Verify initiative exists
     let _ = get_initiative_or_error(pool, initiative_id).await?;
 
@@ -157,11 +158,6 @@ pub async fn get_next_tasks(
 }
 
 // === Initiative Summary ===
-
-use crate::models::initiative::{
-    InitiativeBlockerInfo, InitiativeInfo, InitiativeStatusSummary, InitiativeSummary, NextAction,
-    ProjectSummary,
-};
 
 /// Generate a high-level summary of an initiative.
 ///

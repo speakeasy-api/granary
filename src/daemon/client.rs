@@ -19,8 +19,8 @@ use crate::daemon::protocol::{
     StartWorkerRequest, read_frame, write_frame,
 };
 use crate::error::{GranaryError, Result};
+use crate::models::Worker;
 use crate::models::run::Run;
-use crate::models::worker::Worker;
 use crate::services::global_config as global_config_service;
 
 /// Client for communicating with the granary daemon.

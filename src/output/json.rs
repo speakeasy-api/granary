@@ -1,8 +1,9 @@
+use granary_types::{Project, Task};
 use serde::Serialize;
 use serde_json::json;
 
-use crate::models::initiative::Initiative;
 use crate::models::*;
+use crate::models::{Initiative, InitiativeSummary};
 
 /// Task output with dependency information
 /// This enriched struct includes the blocked_by field that shows unmet dependencies
@@ -244,15 +245,13 @@ pub fn format_initiatives(initiatives: &[Initiative]) -> String {
 
 // === Initiative Summary ===
 
-use crate::models::initiative::InitiativeSummary;
-
 pub fn format_initiative_summary(summary: &InitiativeSummary) -> String {
     serde_json::to_string_pretty(summary).unwrap_or_else(|_| "{}".to_string())
 }
 
 // === Worker formatting ===
 
-use crate::models::worker::Worker;
+use crate::models::Worker;
 
 pub fn format_worker(worker: &Worker) -> String {
     serde_json::to_string_pretty(worker).unwrap_or_else(|_| "{}".to_string())

@@ -1,3 +1,4 @@
+use granary_types::{CreateTask, Task, TaskStatus, UpdateTask};
 use sqlx::SqlitePool;
 
 use crate::db::{self, counters};
@@ -29,7 +30,7 @@ pub async fn create_task(pool: &SqlitePool, input: CreateTask) -> Result<Task> {
         parent_task_id: input.parent_task_id,
         title: input.title,
         description: input.description,
-        status: TaskStatus::Draft.as_str().to_string(),
+        status: input.status.as_str().to_string(),
         priority: input.priority.as_str().to_string(),
         owner: input.owner,
         tags,

@@ -4,7 +4,7 @@ use crate::cli::args::{InitiativeAction, InitiativesAction};
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::db;
 use crate::error::Result;
-use crate::models::initiative::{CreateInitiative, UpdateInitiative};
+use crate::models::{CreateInitiative, UpdateInitiative};
 use crate::output::{Formatter, OutputFormat};
 use crate::services::{self, Workspace};
 use std::time::Duration;

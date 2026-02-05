@@ -12,7 +12,7 @@
 //! - `{field}` - Top-level fields from the event payload
 
 use crate::error::Result;
-use crate::models::event::Event;
+use crate::models::Event;
 use serde_json::Value;
 
 /// Placeholder pattern for template substitution

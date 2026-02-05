@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "sqlx")]
 use sqlx::FromRow;
 
 /// Event types for the audit log
@@ -167,7 +169,8 @@ impl std::str::FromStr for EntityType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
 pub struct Event {
     pub id: i64,
     pub event_type: String,

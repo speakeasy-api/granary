@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "sqlx")]
 use sqlx::FromRow;
 
+/// Session mode enum with snake_case serialization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionMode {
@@ -33,16 +36,24 @@ impl std::str::FromStr for SessionMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+/// Session as returned by granary CLI JSON output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
 pub struct Session {
     pub id: String,
+    #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
     pub owner: Option<String>,
+    #[serde(default)]
     pub mode: Option<String>,
+    #[serde(default)]
     pub focus_task_id: Option<String>,
+    #[serde(default)]
     pub variables: Option<String>, // JSON key/value
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
     pub closed_at: Option<String>,
 }
 
@@ -66,6 +77,7 @@ impl Session {
     }
 }
 
+/// Scope item type enum with snake_case serialization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScopeItemType {
@@ -100,7 +112,9 @@ impl std::str::FromStr for ScopeItemType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+/// Session scope as returned by granary CLI JSON output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
 pub struct SessionScope {
     pub session_id: String,
     pub item_type: String,
@@ -114,6 +128,7 @@ impl SessionScope {
     }
 }
 
+/// Parameters for creating a new session.
 #[derive(Debug, Default)]
 pub struct CreateSession {
     pub name: Option<String>,
@@ -121,6 +136,7 @@ pub struct CreateSession {
     pub mode: SessionMode,
 }
 
+/// Parameters for updating an existing session.
 #[derive(Debug, Default)]
 pub struct UpdateSession {
     pub name: Option<String>,

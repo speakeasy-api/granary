@@ -4,6 +4,8 @@
 //! Agents use this command to claim a task, get complete context,
 //! and then signal completion or blockers.
 
+use granary_types::{Project, Task};
+
 use crate::cli::args::WorkCommand;
 use crate::db;
 use crate::error::{GranaryError, Result};
@@ -222,11 +224,7 @@ fn resolve_steering_file(
 }
 
 /// Output work context in markdown format
-fn output_work_context(
-    task: &crate::models::Task,
-    project: &crate::models::Project,
-    steering: &[SteeringInfo],
-) {
+fn output_work_context(task: &Task, project: &Project, steering: &[SteeringInfo]) {
     // Header with task ID and title
     println!("## {}: {}", task.id, task.title);
     println!();

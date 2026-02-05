@@ -34,9 +34,9 @@ use tokio::sync::watch;
 
 use crate::db;
 use crate::error::{GranaryError, Result};
-use crate::models::event::Event;
+use crate::models::Event;
 use crate::models::run::{CreateRun, RunStatus, ScheduleRetry, UpdateRunStatus};
-use crate::models::worker::{UpdateWorkerStatus, Worker, WorkerStatus};
+use crate::models::{UpdateWorkerStatus, Worker, WorkerStatus};
 use crate::services::event_poller::{EventPoller, EventPollerConfig, create_poller_for_worker};
 use crate::services::global_config;
 use crate::services::polled_events::PolledEventEmitter;

@@ -8,12 +8,12 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use granary_types::Task;
 use sqlx::SqlitePool;
 
 use crate::db;
 use crate::error::Result;
-use crate::models::Task;
-use crate::models::event::{EntityType, Event, EventType};
+use crate::models::{EntityType, Event, EventType};
 
 /// State for tracking polled event emissions per entity.
 /// Used to implement time-gating to prevent duplicate events.
@@ -141,7 +141,7 @@ impl PolledEventEmitter {
     fn create_synthetic_project_event(
         &self,
         event_type: EventType,
-        project: &crate::models::Project,
+        project: &granary_types::Project,
     ) -> Event {
         let now = chrono::Utc::now();
         Event {

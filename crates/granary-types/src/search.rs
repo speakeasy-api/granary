@@ -1,3 +1,5 @@
+//! Search result types for granary.
+
 use serde::{Deserialize, Serialize};
 
 /// Search result item (can be an initiative, project, or task)

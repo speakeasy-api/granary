@@ -11,7 +11,7 @@ pub async fn show_entry_point() -> Result<()> {
             println!("  granary plan \"Feature name\"");
             println!();
             println!("Plan multi-project work:");
-            println!("  granary initiative \"Initiative name\"");
+            println!("  granary initiate \"Initiative name\"");
             println!();
             println!("Work on task:");
             println!("  granary work <task-id>");

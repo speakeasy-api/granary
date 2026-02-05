@@ -3,8 +3,10 @@
 //! This format is designed to be machine-readable by LLMs while remaining
 //! human-readable. It uses a consistent structure that's easy to parse.
 
-use crate::models::initiative::Initiative;
+use granary_types::{Project, Task};
+
 use crate::models::*;
+use crate::models::{Initiative, InitiativeSummary};
 use crate::output::json::{ContextOutput, HandoffOutput, SummaryOutput};
 
 /// Format a project for LLM consumption
@@ -672,8 +674,6 @@ pub fn format_initiatives(initiatives: &[Initiative]) -> String {
 }
 
 // === Initiative Summary ===
-
-use crate::models::initiative::InitiativeSummary;
 
 /// Format an initiative summary for LLM consumption.
 /// Optimized for low token count while conveying actionable information.

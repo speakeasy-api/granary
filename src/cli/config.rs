@@ -1,13 +1,13 @@
 use crate::cli::args::{ConfigAction, RunnersAction, SteeringAction};
 use crate::db;
 use crate::error::Result;
-use crate::models::global_config::RunnerConfig;
+use crate::models::RunnerConfig;
 use crate::output::OutputFormat;
 use crate::services::{Workspace, global_config_service};
 use std::collections::HashMap;
 
 /// Handle config subcommands
-pub async fn config(action: ConfigAction, _format: OutputFormat) -> Result<()> {
+pub async fn config(action: ConfigAction, format: OutputFormat) -> Result<()> {
     match action {
         // Workspace-level config commands need workspace
         ConfigAction::Get { key } => {
@@ -31,7 +31,15 @@ pub async fn config(action: ConfigAction, _format: OutputFormat) -> Result<()> {
             let workspace = Workspace::find()?;
             let pool = workspace.pool().await?;
             let items = db::config::list(&pool).await?;
-            if items.is_empty() {
+            if format == OutputFormat::Json {
+                // Convert to array of objects for GUI consumption
+                let entries: Vec<serde_json::Value> = items
+                    .iter()
+                    .map(|(k, v)| serde_json::json!({"key": k, "value": v}))
+                    .collect();
+                let json = serde_json::to_string(&entries)?;
+                println!("{}", json);
+            } else if items.is_empty() {
                 println!("No config values set");
             } else {
                 for (key, value) in items {
@@ -60,7 +68,7 @@ pub async fn config(action: ConfigAction, _format: OutputFormat) -> Result<()> {
         }
 
         ConfigAction::Runners { action } => {
-            handle_runners_action(action).await?;
+            handle_runners_action(action, format).await?;
         }
     }
 
@@ -68,12 +76,16 @@ pub async fn config(action: ConfigAction, _format: OutputFormat) -> Result<()> {
 }
 
 /// Handle runners subcommands
-async fn handle_runners_action(action: Option<RunnersAction>) -> Result<()> {
+async fn handle_runners_action(action: Option<RunnersAction>, format: OutputFormat) -> Result<()> {
     match action {
         None => {
             // List all runners
             let config = global_config_service::load()?;
-            if config.runners.is_empty() {
+            if format == OutputFormat::Json {
+                // Output as JSON for programmatic access (e.g., GUI)
+                let json = serde_json::to_string(&config.runners)?;
+                println!("{}", json);
+            } else if config.runners.is_empty() {
                 println!("No runners configured.");
                 println!("\nAdd a runner with:");
                 println!("  granary config runners add <name> --command <cmd>");
@@ -213,7 +225,7 @@ fn parse_env_vars(env_vars: &[String]) -> HashMap<String, String> {
 }
 
 /// Handle steering subcommands
-pub async fn steering(action: SteeringAction, _format: OutputFormat) -> Result<()> {
+pub async fn steering(action: SteeringAction, format: OutputFormat) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -221,7 +233,10 @@ pub async fn steering(action: SteeringAction, _format: OutputFormat) -> Result<(
         SteeringAction::List => {
             let files = db::steering::list(&pool).await?;
 
-            if files.is_empty() {
+            if format == OutputFormat::Json {
+                let json = serde_json::to_string(&files)?;
+                println!("{}", json);
+            } else if files.is_empty() {
                 println!("No steering files configured");
             } else {
                 println!("Steering files:");

@@ -1,7 +1,8 @@
+use granary_types::{Project, Task};
 use tabled::{Table, Tabled};
 
-use crate::models::initiative::Initiative;
 use crate::models::*;
+use crate::models::{Initiative, InitiativeSummary};
 
 #[derive(Tabled)]
 struct ProjectRow {
@@ -519,8 +520,6 @@ pub fn format_initiatives(initiatives: &[Initiative]) -> String {
 
 // === Initiative Summary ===
 
-use crate::models::initiative::InitiativeSummary;
-
 /// Format an initiative summary as a table/text output
 pub fn format_initiative_summary(summary: &InitiativeSummary) -> String {
     let mut output = String::new();
@@ -613,7 +612,7 @@ fn create_progress_bar(percent: f32, width: usize) -> String {
 
 // === Worker formatting ===
 
-use crate::models::worker::Worker;
+use crate::models::Worker;
 
 #[derive(Tabled)]
 struct WorkerRow {

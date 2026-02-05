@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "sqlx")]
 use sqlx::FromRow;
 
+/// Initiative status enum with snake_case serialization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum InitiativeStatus {
@@ -18,6 +21,12 @@ impl InitiativeStatus {
     }
 }
 
+impl std::fmt::Display for InitiativeStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl std::str::FromStr for InitiativeStatus {
     type Err = ();
 
@@ -30,14 +39,19 @@ impl std::str::FromStr for InitiativeStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+/// Initiative as returned by granary CLI JSON output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
 pub struct Initiative {
     pub id: String,
     pub slug: String,
     pub name: String,
+    #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
     pub owner: Option<String>,
     pub status: String,
+    #[serde(default)]
     pub tags: Option<String>, // JSON array
     pub created_at: String,
     pub updated_at: String,
@@ -57,6 +71,7 @@ impl Initiative {
     }
 }
 
+/// Input for creating a new initiative.
 #[derive(Debug, Default)]
 pub struct CreateInitiative {
     pub name: String,
@@ -65,6 +80,7 @@ pub struct CreateInitiative {
     pub tags: Vec<String>,
 }
 
+/// Input for updating an existing initiative.
 #[derive(Debug, Default)]
 pub struct UpdateInitiative {
     pub name: Option<String>,
@@ -74,8 +90,9 @@ pub struct UpdateInitiative {
     pub tags: Option<Vec<String>>,
 }
 
-/// Junction table model for initiative-project many-to-many relationship
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+/// Junction table model for initiative-project many-to-many relationship.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
 pub struct InitiativeProject {
     pub initiative_id: String,
     pub project_id: String,
@@ -84,7 +101,7 @@ pub struct InitiativeProject {
 
 // === Initiative Summary Models ===
 
-/// High-level summary of an initiative for orchestration scenarios
+/// High-level summary of an initiative for orchestration scenarios.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitiativeSummary {
     pub initiative: InitiativeInfo,
@@ -94,7 +111,7 @@ pub struct InitiativeSummary {
     pub next_actions: Vec<NextAction>,
 }
 
-/// Basic initiative identification info
+/// Basic initiative identification info.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitiativeInfo {
     pub id: String,
@@ -102,7 +119,7 @@ pub struct InitiativeInfo {
     pub description: Option<String>,
 }
 
-/// Aggregated status counts for an initiative
+/// Aggregated status counts for an initiative.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitiativeStatusSummary {
     pub total_projects: usize,
@@ -116,7 +133,7 @@ pub struct InitiativeStatusSummary {
     pub percent_complete: f32,
 }
 
-/// Summary of a project within an initiative
+/// Summary of a project within an initiative.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSummary {
     pub id: String,
@@ -127,7 +144,7 @@ pub struct ProjectSummary {
     pub blocked_by: Vec<String>,
 }
 
-/// Blocker information for initiative summary
+/// Blocker information for initiative summary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitiativeBlockerInfo {
     pub project_id: String,
@@ -136,7 +153,7 @@ pub struct InitiativeBlockerInfo {
     pub description: String,
 }
 
-/// Next actionable task for initiative summary
+/// Next actionable task for initiative summary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NextAction {
     pub task_id: String,

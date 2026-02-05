@@ -87,7 +87,7 @@ impl RunnerConfig {
 
 /// Expand environment variables in a string.
 /// Supports ${VAR} and $VAR syntax.
-fn expand_env_vars(input: &str) -> String {
+pub fn expand_env_vars(input: &str) -> String {
     let mut result = input.to_string();
 
     // Handle ${VAR} syntax

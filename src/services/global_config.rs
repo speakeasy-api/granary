@@ -5,7 +5,7 @@
 
 use crate::db::connection::{create_pool, run_migrations};
 use crate::error::{GranaryError, Result};
-use crate::models::global_config::{GlobalConfig, RunnerConfig};
+use crate::models::{GlobalConfig, RunnerConfig};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tokio::sync::OnceCell;

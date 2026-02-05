@@ -2,9 +2,11 @@ pub mod json;
 pub mod prompt;
 pub mod table;
 
+use granary_types::{Initiative, InitiativeSummary, Project, Task};
+
 use crate::models::run::Run;
-use crate::models::worker;
 use crate::models::*;
+use granary_types::worker;
 
 /// Output format enum
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -202,7 +204,7 @@ impl Formatter {
         }
     }
 
-    pub fn format_initiative(&self, initiative: &initiative::Initiative) -> String {
+    pub fn format_initiative(&self, initiative: &Initiative) -> String {
         match self.format {
             OutputFormat::Json => json::format_initiative(initiative),
             OutputFormat::Yaml => yaml_format_initiative(initiative),
@@ -212,7 +214,7 @@ impl Formatter {
         }
     }
 
-    pub fn format_initiatives(&self, initiatives: &[initiative::Initiative]) -> String {
+    pub fn format_initiatives(&self, initiatives: &[Initiative]) -> String {
         match self.format {
             OutputFormat::Json => json::format_initiatives(initiatives),
             OutputFormat::Yaml => yaml_format_initiatives(initiatives),
@@ -222,7 +224,7 @@ impl Formatter {
         }
     }
 
-    pub fn format_initiative_summary(&self, summary: &initiative::InitiativeSummary) -> String {
+    pub fn format_initiative_summary(&self, summary: &InitiativeSummary) -> String {
         match self.format {
             OutputFormat::Json => json::format_initiative_summary(summary),
             OutputFormat::Yaml => yaml_format_initiative_summary(summary),
@@ -521,11 +523,11 @@ fn yaml_format_search_results(results: &[SearchResult]) -> String {
     serde_yaml::to_string(results).unwrap_or_else(|_| "Error formatting YAML".to_string())
 }
 
-fn yaml_format_initiative(initiative: &initiative::Initiative) -> String {
+fn yaml_format_initiative(initiative: &Initiative) -> String {
     serde_yaml::to_string(initiative).unwrap_or_else(|_| "Error formatting YAML".to_string())
 }
 
-fn yaml_format_initiatives(initiatives: &[initiative::Initiative]) -> String {
+fn yaml_format_initiatives(initiatives: &[Initiative]) -> String {
     serde_yaml::to_string(initiatives).unwrap_or_else(|_| "Error formatting YAML".to_string())
 }
 
@@ -576,7 +578,7 @@ fn md_format_search_results(results: &[SearchResult]) -> String {
     md
 }
 
-fn md_format_initiative(initiative: &initiative::Initiative) -> String {
+fn md_format_initiative(initiative: &Initiative) -> String {
     let mut md = String::new();
     md.push_str(&format!("# {}\n\n", initiative.name));
     md.push_str(&format!("**ID:** `{}`\n", initiative.id));
@@ -594,7 +596,7 @@ fn md_format_initiative(initiative: &initiative::Initiative) -> String {
     md
 }
 
-fn md_format_initiatives(initiatives: &[initiative::Initiative]) -> String {
+fn md_format_initiatives(initiatives: &[Initiative]) -> String {
     let mut md = String::from("# Initiatives\n\n");
     for initiative in initiatives {
         md.push_str(&format!(
@@ -605,11 +607,11 @@ fn md_format_initiatives(initiatives: &[initiative::Initiative]) -> String {
     md
 }
 
-fn yaml_format_initiative_summary(summary: &initiative::InitiativeSummary) -> String {
+fn yaml_format_initiative_summary(summary: &InitiativeSummary) -> String {
     serde_yaml::to_string(summary).unwrap_or_else(|_| "Error formatting YAML".to_string())
 }
 
-fn md_format_initiative_summary(summary: &initiative::InitiativeSummary) -> String {
+fn md_format_initiative_summary(summary: &InitiativeSummary) -> String {
     let mut md = String::new();
 
     // Header

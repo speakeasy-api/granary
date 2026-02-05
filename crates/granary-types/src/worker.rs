@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "sqlx")]
 use sqlx::FromRow;
 
 /// Worker status enum representing the lifecycle states of a worker process
@@ -48,7 +50,8 @@ impl std::fmt::Display for WorkerStatus {
 ///
 /// Workers are stored in a global database (~/.granary/workers.db) to allow
 /// `granary worker list` to show workers across all workspaces.
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
 pub struct Worker {
     /// Unique identifier: worker-<8char>
     pub id: String,

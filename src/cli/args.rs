@@ -14,7 +14,7 @@ AGENTS (AI/LLM):
     granary plan \"Feature name\"
 
   Plan multi-project work:
-    granary initiative \"Initiative name\"
+    granary initiate \"Initiative name\"
 
   Work on a task:
     granary work start <task-id>
@@ -93,13 +93,17 @@ pub enum Commands {
     Doctor,
 
     /// Plan a new feature - creates project and guides task creation
-    #[command(after_help = "EXAMPLE:\n    granary plan \"Add Instagram OAuth2 provider\"")]
+    #[command(
+        arg_required_else_help = true,
+        after_help = "EXAMPLES:\n    granary plan \"Add Instagram OAuth2 provider\"\n    granary plan --project existing-project-abc1"
+    )]
     Plan {
-        /// Feature/project name
-        name: String,
+        /// Feature/project name (creates a new project)
+        #[arg(conflicts_with = "project")]
+        name: Option<String>,
 
         /// Plan an existing project (for initiative sub-projects)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "name")]
         project: Option<String>,
     },
 
@@ -317,7 +321,7 @@ pub enum Commands {
 
     /// List all initiatives or create a new one
     #[command(
-        after_help = "AGENTS: To plan a multi-project initiative, use:\n    granary initiative \"Initiative name\""
+        after_help = "AGENTS: To plan a multi-project initiative, use:\n    granary initiate \"Initiative name\""
     )]
     Initiatives {
         #[command(subcommand)]
@@ -328,14 +332,25 @@ pub enum Commands {
         all: bool,
     },
 
-    /// Work with a specific initiative or plan a new one
-    #[command(after_help = "EXAMPLE:\n    granary initiative \"User authentication system\"")]
+    /// Work with a specific initiative
+    #[command(after_help = "EXAMPLE:\n    granary initiative user-auth-abc1 projects")]
     Initiative {
-        /// Initiative ID (or name to create new)
+        /// Initiative ID
         id: String,
 
         #[command(subcommand)]
         action: Option<InitiativeAction>,
+    },
+
+    /// Start planning a multi-project initiative (agent-friendly)
+    #[command(after_help = "EXAMPLE:\n    granary initiate \"User authentication system\"")]
+    Initiate {
+        /// Initiative name
+        name: String,
+
+        /// Optional description
+        #[arg(long)]
+        description: Option<String>,
     },
 
     /// Update granary to the latest version
@@ -574,6 +589,10 @@ pub enum ProjectTasksAction {
         /// Priority (P0-P4)
         #[arg(long, default_value = "P2")]
         priority: String,
+
+        /// Status (draft, todo)
+        #[arg(long, default_value = "draft")]
+        status: String,
 
         /// Owner
         #[arg(long)]
@@ -1026,7 +1045,7 @@ pub enum SteeringAction {
 pub enum InitiativesAction {
     /// Create a new initiative
     #[command(
-        after_help = "AGENTS: For guided initiative planning with project creation, use:\n    granary initiative \"Initiative name\""
+        after_help = "AGENTS: For guided initiative planning with project creation, use:\n    granary initiate \"Initiative name\""
     )]
     Create {
         /// Initiative name

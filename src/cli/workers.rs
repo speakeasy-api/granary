@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::db;
 use crate::error::Result;
-use crate::models::worker::WorkerStatus;
+use crate::models::WorkerStatus;
 use crate::output::{Formatter, OutputFormat};
 use crate::services::global_config_service;
 

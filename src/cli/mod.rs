@@ -6,6 +6,7 @@ pub mod config;
 pub mod daemon;
 pub mod entrypoint;
 pub mod init;
+pub mod initiate;
 pub mod initiatives;
 pub mod plan;
 pub mod projects;

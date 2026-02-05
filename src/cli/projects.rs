@@ -1,10 +1,11 @@
+use granary_types::{CreateProject, CreateTask, UpdateProject};
+
 use crate::cli::args::{
     ProjectAction, ProjectDepsAction, ProjectSteerAction, ProjectTasksAction, ProjectsAction,
 };
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::db;
 use crate::error::Result;
-use crate::models::*;
 use crate::output::{Formatter, OutputFormat};
 use crate::services::{self, Workspace};
 use std::time::Duration;
@@ -121,12 +122,14 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
                     title,
                     description,
                     priority,
+                    status,
                     owner,
                     dependencies,
                     tags,
                     due,
                 }) => {
                     let priority = priority.parse().unwrap_or_default();
+                    let status = status.parse().unwrap_or_default();
                     let tags = tags
                         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                         .unwrap_or_default();
@@ -138,6 +141,7 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
                             title,
                             description,
                             priority,
+                            status,
                             owner,
                             tags,
                             due_at: due,
@@ -193,8 +197,8 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
                 return Ok(());
             }
 
-            // Count draft tasks
-            let draft_count = tasks.iter().filter(|t| t.status == "draft").count();
+            // Update all draft tasks to todo
+            let updated_count = db::tasks::set_draft_tasks_to_todo(&pool, id).await?;
 
             // Get project dependencies
             let deps = db::project_dependencies::list(&pool, id).await?;
@@ -208,12 +212,9 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
             println!("Dependencies configured: {}", deps.len());
             println!("Steering files: {}", steering_files.len());
 
-            if draft_count > 0 {
+            if updated_count > 0 {
                 println!();
-                println!(
-                    "Warning: {} draft task(s) found. Use `granary task <id> ready` to activate.",
-                    draft_count
-                );
+                println!("Activated {} draft task(s) (draft -> todo).", updated_count);
             }
         }
 

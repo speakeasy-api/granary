@@ -7,6 +7,8 @@ use crate::models::*;
 
 /// Database operations for projects
 pub mod projects {
+    use granary_types::Project;
+
     use super::*;
 
     pub async fn create(pool: &SqlitePool, project: &Project) -> Result<()> {
@@ -123,7 +125,7 @@ pub mod projects {
 pub mod initiatives {
     use super::*;
     use crate::models::ids;
-    use crate::models::initiative::{CreateInitiative, Initiative, UpdateInitiative};
+    use crate::models::{CreateInitiative, Initiative, UpdateInitiative};
 
     pub async fn create(pool: &SqlitePool, input: &CreateInitiative) -> Result<Initiative> {
         let id = ids::generate_initiative_id(&input.name);
@@ -273,9 +275,10 @@ pub mod initiatives {
 
 /// Database operations for initiative-project relationships
 pub mod initiative_projects {
+    use granary_types::{Project, ProjectDependency};
+
     use super::*;
-    use crate::models::ProjectDependency;
-    use crate::models::initiative::Initiative;
+    use crate::models::Initiative;
 
     /// Add a project to an initiative
     pub async fn add(pool: &SqlitePool, initiative_id: &str, project_id: &str) -> Result<()> {
@@ -360,6 +363,8 @@ pub mod initiative_projects {
 
 /// Database operations for tasks
 pub mod tasks {
+    use granary_types::Task;
+
     use super::*;
 
     pub async fn create(pool: &SqlitePool, task: &Task) -> Result<()> {
@@ -512,13 +517,16 @@ pub mod tasks {
         // 1. Status is todo
         // 2. Not blocked
         // 3. All dependencies are done
-        // 4. Order by priority, due_at, created_at
+        // 4. Project is active (not archived)
+        // 5. Order by priority, due_at, created_at
 
         let base_query = r#"
             SELECT t.*
             FROM tasks t
+            JOIN projects p ON p.id = t.project_id
             WHERE t.status IS 'todo'
               AND t.blocked_reason IS NULL
+              AND p.status = 'active'
               AND NOT EXISTS (
                   SELECT 1 FROM task_dependencies td
                   JOIN tasks dep ON dep.id = td.depends_on_task_id
@@ -570,17 +578,21 @@ pub mod tasks {
 
     /// Get all actionable tasks (next tasks without limit)
     /// Draft tasks are excluded from actionable tasks
+    /// Archived projects are excluded
     pub async fn get_all_next(
         pool: &SqlitePool,
         project_ids: Option<&[String]>,
     ) -> Result<Vec<Task>> {
         // Same query as get_next but without LIMIT 1
         // Draft tasks are excluded (only 'todo' is actionable)
+        // Archived projects are excluded
         let base_query = r#"
             SELECT t.*
             FROM tasks t
+            JOIN projects p ON p.id = t.project_id
             WHERE t.status IS 'todo'
               AND t.blocked_reason IS NULL
+              AND p.status = 'active'
               AND NOT EXISTS (
                   SELECT 1 FROM task_dependencies td
                   JOIN tasks dep ON dep.id = td.depends_on_task_id
@@ -624,10 +636,29 @@ pub mod tasks {
 
         Ok(tasks)
     }
+
+    /// Update all draft tasks in a project to todo status
+    /// Returns the number of tasks updated
+    pub async fn set_draft_tasks_to_todo(pool: &SqlitePool, project_id: &str) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE tasks
+            SET status = 'todo', updated_at = ?, version = version + 1
+            WHERE project_id = ? AND status = 'draft'
+            "#,
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(project_id)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
 }
 
 /// Database operations for task dependencies
 pub mod dependencies {
+    use granary_types::{Task, TaskDependency};
+
     use super::*;
 
     pub async fn add(pool: &SqlitePool, task_id: &str, depends_on: &str) -> Result<()> {
@@ -720,6 +751,8 @@ pub mod dependencies {
 
 /// Database operations for project dependencies
 pub mod project_dependencies {
+    use granary_types::{Project, ProjectDependency};
+
     use super::*;
     use crate::error::GranaryError;
 
@@ -1560,6 +1593,8 @@ pub mod config {
 
 /// Database operations for search
 pub mod search {
+    use granary_types::{Project, Task};
+
     use super::*;
 
     /// Search projects by name (case-insensitive)
@@ -1597,8 +1632,8 @@ pub mod search {
     pub async fn search_initiatives(
         pool: &SqlitePool,
         query: &str,
-    ) -> Result<Vec<crate::models::initiative::Initiative>> {
-        let initiatives = sqlx::query_as::<_, crate::models::initiative::Initiative>(
+    ) -> Result<Vec<crate::models::Initiative>> {
+        let initiatives = sqlx::query_as::<_, crate::models::Initiative>(
             r#"
             SELECT * FROM initiatives
             WHERE name LIKE ? COLLATE NOCASE
@@ -1615,6 +1650,8 @@ pub mod search {
 /// Database operations for getting next tasks across an initiative
 /// This respects both project-to-project dependencies and task-to-task dependencies
 pub mod initiative_tasks {
+    use granary_types::Task;
+
     use super::*;
 
     /// Get all unblocked tasks across an initiative.
@@ -1624,15 +1661,17 @@ pub mod initiative_tasks {
     /// 2. The task itself has no unmet task dependencies (all dependency tasks are done)
     /// 3. The task is not blocked (status != blocked, no blocked_reason)
     /// 4. The task is todo or in_progress
+    /// 5. The project is active (not archived)
     ///
     /// Results are sorted by priority (P0 first), due_at (earliest first), created_at, and id (for determinism).
     pub async fn get_next(pool: &SqlitePool, initiative_id: &str, all: bool) -> Result<Vec<Task>> {
-        // Step 1: Get all project IDs in the initiative
+        // Step 1: Get all active (non-archived) project IDs in the initiative
         let project_rows: Vec<(String,)> = sqlx::query_as(
             r#"
             SELECT p.id FROM projects p
             JOIN initiative_projects ip ON p.id = ip.project_id
             WHERE ip.initiative_id = ?
+              AND p.status = 'active'
             "#,
         )
         .bind(initiative_id)
@@ -1727,7 +1766,7 @@ pub mod initiative_tasks {
 pub mod workers {
     use super::*;
     use crate::models::ids::generate_worker_id;
-    use crate::models::worker::{CreateWorker, UpdateWorkerStatus, Worker, WorkerStatus};
+    use crate::models::{CreateWorker, UpdateWorkerStatus, Worker, WorkerStatus};
 
     /// Create a new worker record
     pub async fn create(pool: &SqlitePool, input: &CreateWorker) -> Result<Worker> {

@@ -1,3 +1,5 @@
+use granary_types::{CreateTask, UpdateTask};
+
 use crate::cli::args::{ArtifactAction, CommentAction, DepsAction, SubtaskAction, TaskAction};
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::db;

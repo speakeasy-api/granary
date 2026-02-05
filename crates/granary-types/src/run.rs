@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "sqlx")]
 use sqlx::FromRow;
 
 /// Run status enum representing the lifecycle states of a runner execution
@@ -56,7 +58,8 @@ impl std::fmt::Display for RunStatus {
 /// with exponential backoff.
 ///
 /// Runs are stored in the same global database as workers (~/.granary/workers.db).
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
 pub struct Run {
     /// Unique identifier: run-<8char>
     pub id: String,

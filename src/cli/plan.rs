@@ -1,18 +1,23 @@
+use granary_types::{CreateProject, Project, Task};
+
 use crate::db;
 use crate::error::Result;
-use crate::models::*;
 use crate::services::{self, Workspace};
 
 /// Handle the plan command - creates a project and outputs guidance for task creation
-pub async fn plan(name: &str, existing_project: Option<String>) -> Result<()> {
+/// Note: clap ensures exactly one of `name` or `existing_project` is provided
+pub async fn plan(name: Option<&str>, existing_project: Option<String>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
-    // Either use existing project or create a new one
-    let project = if let Some(project_id) = existing_project {
-        services::get_project(&pool, &project_id).await?
-    } else {
-        services::create_project(
+    if let Some(project_id) = existing_project {
+        // Existing project mode - for sub-agents planning initiative projects
+        let project = services::get_project(&pool, &project_id).await?;
+        let tasks = services::list_tasks_by_project(&pool, &project_id).await?;
+        print_existing_project_guidance(&project, &tasks);
+    } else if let Some(name) = name {
+        // New project mode - creates project and guides task creation
+        let project = services::create_project(
             &pool,
             CreateProject {
                 name: name.to_string(),
@@ -22,14 +27,14 @@ pub async fn plan(name: &str, existing_project: Option<String>) -> Result<()> {
                 ..Default::default()
             },
         )
-        .await?
-    };
+        .await?;
 
-    // Search for prior art - similar/related projects
-    let prior_art = find_prior_art(&pool, name).await?;
+        // Search for prior art - similar/related projects
+        let prior_art = find_prior_art(&pool, name).await?;
 
-    // Output the guidance
-    print_planning_guidance(&project, &prior_art);
+        // Output the guidance
+        print_planning_guidance(&project, &prior_art);
+    }
 
     Ok(())
 }
@@ -136,5 +141,89 @@ fn print_planning_guidance(project: &Project, prior_art: &[ProjectWithProgress])
     // Finish section
     println!("## Finish");
     println!();
-    println!("  granary project {} update --status ready", project.id);
+    println!("  granary project {} ready", project.id);
+}
+
+/// Print guidance for planning an existing project (sub-agent mode for initiatives)
+fn print_existing_project_guidance(project: &Project, tasks: &[Task]) {
+    println!("# Project: {}", project.name);
+    println!();
+    println!("ID: {}", project.id);
+
+    // Show description if present
+    if let Some(ref desc) = project.description {
+        println!();
+        println!("## Description");
+        println!();
+        println!("{}", desc);
+    }
+
+    // Show existing tasks if any (don't mention if none)
+    if !tasks.is_empty() {
+        println!();
+        println!("## Existing Tasks");
+        println!();
+        for task in tasks {
+            let status_indicator = match task.status.as_str() {
+                "done" => "[x]",
+                "in_progress" => "[~]",
+                "blocked" => "[!]",
+                _ => "[ ]",
+            };
+            println!(
+                "- {} {} ({}) - {}",
+                status_indicator, task.id, task.priority, task.title
+            );
+        }
+    }
+
+    println!();
+    println!("## Research");
+    println!();
+    println!("Before creating tasks, research the codebase:");
+    println!("- Find all files that need modification (exact paths, line numbers)");
+    println!("- Document existing patterns to follow");
+    println!("- Identify test patterns to replicate");
+    println!();
+
+    // Create Tasks section
+    println!("## Create Tasks");
+    println!();
+    println!("Task descriptions are the ONLY context workers receive.");
+    println!();
+    println!(
+        r#"  granary project {} tasks create "Task title" --priority P1 --description "
+  **Goal:** What this accomplishes
+
+  **Files to modify:**
+  - path/to/file.rs:10-20 (what to change)
+
+  **Pattern:**
+  \`\`\`rust
+  // code example from existing similar code
+  \`\`\`
+
+  **Acceptance criteria:**
+  - [ ] Criterion 1
+  ""#,
+        project.id
+    );
+    println!();
+
+    // Set Dependencies section
+    println!("## Set Dependencies");
+    println!();
+    println!("  granary task <task-id> deps add <other-task-id>");
+    println!();
+
+    // Attach Steering Files section
+    println!("## Attach Steering Files");
+    println!();
+    println!("  granary steering add <path> --project {}", project.id);
+    println!();
+
+    // Finish section
+    println!("## Finish");
+    println!();
+    println!("  granary project {} ready", project.id);
 }

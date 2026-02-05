@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 
 use crate::db;
 use crate::error::{GranaryError, Result};
-use crate::models::event::Event;
+use crate::models::Event;
 use crate::services::filter::{Filter, matches_all, parse_filters};
 
 /// Default polling interval in milliseconds
@@ -321,7 +321,7 @@ impl EventPoller {
 /// This is a convenience function that creates an EventPoller from
 /// an existing Worker struct.
 pub fn create_poller_for_worker(
-    worker: &crate::models::worker::Worker,
+    worker: &crate::models::Worker,
     workspace_pool: SqlitePool,
     global_pool: SqlitePool,
     config: EventPollerConfig,

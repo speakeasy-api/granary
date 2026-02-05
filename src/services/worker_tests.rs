@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::models::worker::{CreateWorker, UpdateWorkerStatus, Worker, WorkerStatus};
+    use crate::models::{CreateWorker, UpdateWorkerStatus, Worker, WorkerStatus};
 
     // ==========================================
     // WorkerStatus Tests
