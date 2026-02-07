@@ -1,6 +1,7 @@
 pub mod agent_files;
 pub mod batch_service;
 pub mod checkpoint_service;
+pub mod event_consumer;
 pub mod event_poller;
 pub mod filter;
 pub mod global_config;
@@ -29,7 +30,8 @@ mod worker_tests;
 pub use agent_files::*;
 pub use batch_service::*;
 pub use checkpoint_service::*;
-pub use event_poller::{EventPoller, EventPollerConfig, create_poller_for_worker};
+pub use event_consumer::EventConsumerService;
+pub use event_poller::{EventPoller, EventPollerConfig};
 pub use filter::{Filter, FilterOp, matches_all, matches_any, parse_filters};
 pub use global_config as global_config_service;
 pub use initiative_service::*;

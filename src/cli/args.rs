@@ -403,6 +403,31 @@ pub enum Commands {
         command: RunCommand,
     },
 
+    /// List and manage events
+    #[command(
+        after_help = "EXAMPLES:\n    granary events                            # List recent events\n    granary events --type task.created --since 1h  # Filter by type and time\n    granary events --watch                    # Tail events\n    granary events drain --before 7d          # Drain old events"
+    )]
+    Events {
+        #[command(subcommand)]
+        action: Option<EventsAction>,
+
+        /// Filter by event type (e.g., task.created, project.updated)
+        #[arg(long = "type")]
+        event_type: Option<String>,
+
+        /// Filter by entity type (e.g., task, project)
+        #[arg(long)]
+        entity: Option<String>,
+
+        /// Show events since duration (1h, 7d, 30m) or ISO timestamp
+        #[arg(long)]
+        since: Option<String>,
+
+        /// Maximum number of events to show
+        #[arg(long, default_value = "50")]
+        limit: u32,
+    },
+
     /// Manage the granary daemon
     Daemon {
         #[command(subcommand)]
@@ -1230,6 +1255,15 @@ pub enum RunCommand {
     Resume {
         /// Run ID
         run_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum EventsAction {
+    /// Drain (delete) old events
+    Drain {
+        /// Delete events before this duration (1h, 7d, 30m) or ISO timestamp
+        before: String,
     },
 }
 

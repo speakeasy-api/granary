@@ -249,6 +249,18 @@ pub fn format_initiative_summary(summary: &InitiativeSummary) -> String {
     serde_json::to_string_pretty(summary).unwrap_or_else(|_| "{}".to_string())
 }
 
+// === Event formatting ===
+
+use crate::models::Event;
+
+pub fn format_event(event: &Event) -> String {
+    serde_json::to_string_pretty(event).unwrap_or_else(|_| "{}".to_string())
+}
+
+pub fn format_events(events: &[Event]) -> String {
+    serde_json::to_string_pretty(events).unwrap_or_else(|_| "[]".to_string())
+}
+
 // === Worker formatting ===
 
 use crate::models::Worker;

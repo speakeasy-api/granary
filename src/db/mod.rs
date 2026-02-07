@@ -1204,6 +1204,217 @@ pub mod events {
         .await?;
         Ok(events)
     }
+
+    /// List events with optional filters for CLI display
+    pub async fn list_filtered(
+        pool: &SqlitePool,
+        event_type: Option<&str>,
+        entity_type: Option<&str>,
+        since: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Event>> {
+        let mut query = String::from("SELECT * FROM events WHERE 1=1");
+        if event_type.is_some() {
+            query.push_str(" AND event_type = ?");
+        }
+        if entity_type.is_some() {
+            query.push_str(" AND entity_type = ?");
+        }
+        if since.is_some() {
+            query.push_str(" AND created_at >= ?");
+        }
+        query.push_str(" ORDER BY id DESC LIMIT ?");
+
+        let mut q = sqlx::query_as::<_, Event>(&query);
+        if let Some(et) = event_type {
+            q = q.bind(et);
+        }
+        if let Some(ent) = entity_type {
+            q = q.bind(ent);
+        }
+        if let Some(s) = since {
+            q = q.bind(s);
+        }
+        q = q.bind(limit);
+
+        let events = q.fetch_all(pool).await?;
+        Ok(events)
+    }
+
+    /// Delete events created before a given timestamp
+    pub async fn delete_before(pool: &SqlitePool, before_timestamp: &str) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM events WHERE created_at < ?")
+            .bind(before_timestamp)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Get the maximum event ID (useful for drain operations)
+    pub async fn max_id_before(pool: &SqlitePool, before_timestamp: &str) -> Result<i64> {
+        let id = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(id), 0) FROM events WHERE created_at < ?",
+        )
+        .bind(before_timestamp)
+        .fetch_one(pool)
+        .await?;
+        Ok(id)
+    }
+}
+
+/// Database operations for event consumers
+pub mod event_consumers {
+    use super::*;
+    use crate::models::EventConsumer;
+
+    pub async fn register(
+        pool: &SqlitePool,
+        id: &str,
+        event_type: &str,
+        started_at: &str,
+        last_seen_id: i64,
+    ) -> Result<EventConsumer> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            r#"
+            INSERT INTO event_consumers (id, event_type, started_at, last_seen_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET updated_at = ?
+            "#,
+        )
+        .bind(id)
+        .bind(event_type)
+        .bind(started_at)
+        .bind(last_seen_id)
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .execute(pool)
+        .await?;
+
+        get(pool, id).await?.ok_or_else(|| {
+            crate::error::GranaryError::Conflict("Failed to register event consumer".to_string())
+        })
+    }
+
+    pub async fn get(pool: &SqlitePool, id: &str) -> Result<Option<EventConsumer>> {
+        let consumer =
+            sqlx::query_as::<_, EventConsumer>("SELECT * FROM event_consumers WHERE id = ?")
+                .bind(id)
+                .fetch_optional(pool)
+                .await?;
+        Ok(consumer)
+    }
+
+    pub async fn update_last_seen(pool: &SqlitePool, id: &str, last_seen_id: i64) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query("UPDATE event_consumers SET last_seen_id = ?, updated_at = ? WHERE id = ?")
+            .bind(last_seen_id)
+            .bind(&now)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete(pool: &SqlitePool, id: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM event_consumers WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn list(pool: &SqlitePool) -> Result<Vec<EventConsumer>> {
+        let consumers = sqlx::query_as::<_, EventConsumer>(
+            "SELECT * FROM event_consumers ORDER BY created_at DESC",
+        )
+        .fetch_all(pool)
+        .await?;
+        Ok(consumers)
+    }
+}
+
+/// Database operations for event consumptions (claim-based)
+pub mod event_consumptions {
+    use super::*;
+    use crate::models::Event;
+
+    /// Atomically claim the next unclaimed event for a consumer.
+    /// Returns None if no matching events are available.
+    ///
+    /// The `filter_clauses` parameter contains tuples of (sql_fragment, json_path, value)
+    /// from Filter::to_sql(). These are appended as AND conditions.
+    pub async fn try_claim_next(
+        pool: &SqlitePool,
+        consumer_id: &str,
+        event_type: &str,
+        last_seen_id: i64,
+        started_at: &str,
+        filter_clauses: &[(String, String, String)],
+    ) -> Result<Option<Event>> {
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Build the query dynamically based on filters
+        let mut query = String::from(
+            r#"
+            WITH claimed AS (
+                INSERT INTO event_consumptions (consumer_id, event_id, consumed_at)
+                SELECT ?, e.id, ?
+                FROM events e
+                WHERE e.id > ?
+                  AND e.event_type = ?
+                  AND e.created_at >= ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM event_consumptions ec
+                    WHERE ec.consumer_id = ? AND ec.event_id = e.id
+                  )
+            "#,
+        );
+
+        // Append dynamic filter clauses
+        for (sql_frag, _, _) in filter_clauses {
+            query.push_str("  AND ");
+            query.push_str(sql_frag);
+            query.push('\n');
+        }
+
+        query.push_str(
+            r#"
+                ORDER BY e.id ASC
+                LIMIT 1
+                RETURNING event_id
+            )
+            SELECT e.* FROM events e JOIN claimed c ON e.id = c.event_id
+            "#,
+        );
+
+        // Bind parameters in order
+        let mut q = sqlx::query_as::<_, Event>(&query)
+            .bind(consumer_id)
+            .bind(&now)
+            .bind(last_seen_id)
+            .bind(event_type)
+            .bind(started_at)
+            .bind(consumer_id);
+
+        // Bind filter parameters (each filter has json_path and value)
+        for (_, json_path, value) in filter_clauses {
+            q = q.bind(json_path).bind(value);
+        }
+
+        let event = q.fetch_optional(pool).await?;
+        Ok(event)
+    }
+
+    /// Delete consumption records for events before a given event ID
+    pub async fn delete_before(pool: &SqlitePool, before_event_id: i64) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM event_consumptions WHERE event_id < ?")
+            .bind(before_event_id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
 }
 
 /// Database operations for artifacts

@@ -38,6 +38,7 @@ use crate::models::Event;
 use crate::models::run::{CreateRun, RunStatus, ScheduleRetry, UpdateRunStatus};
 use crate::models::{UpdateWorkerStatus, Worker, WorkerStatus};
 use crate::services::event_poller::{EventPoller, EventPollerConfig, create_poller_for_worker};
+
 use crate::services::global_config;
 use crate::services::polled_events::PolledEventEmitter;
 use crate::services::runner::{RunnerHandle, spawn_runner};
@@ -114,7 +115,7 @@ impl WorkerRuntime {
     /// * `workspace_pool` - Connection pool for the workspace database
     /// * `shutdown_rx` - Receiver for shutdown signal
     /// * `config` - Runtime configuration
-    pub fn new(
+    pub async fn new(
         worker: Worker,
         global_pool: SqlitePool,
         workspace_pool: SqlitePool,
@@ -125,12 +126,8 @@ impl WorkerRuntime {
         let poller_config =
             EventPollerConfig::with_poll_interval(config.poll_interval).auto_update_cursor(false); // We manage cursor updates manually
 
-        let poller = create_poller_for_worker(
-            &worker,
-            workspace_pool.clone(),
-            global_pool.clone(),
-            poller_config,
-        )?;
+        let poller =
+            create_poller_for_worker(&worker, workspace_pool.clone(), poller_config).await?;
 
         // Determine log directory
         let log_dir = config.log_dir.clone().unwrap_or_else(|| {
@@ -295,7 +292,7 @@ impl WorkerRuntime {
         // Track the active run
         self.active_runs.insert(run.id.clone(), handle);
 
-        // Acknowledge the event (update cursor) - skip for synthetic polled events
+        // Acknowledge the event - skip for synthetic polled events
         if event.id != 0 {
             self.poller.acknowledge(event.id).await?;
         }
@@ -603,7 +600,8 @@ pub async fn start_worker_runtime(
 ) -> Result<(tokio::task::JoinHandle<Result<()>>, watch::Sender<bool>)> {
     let (shutdown_tx, shutdown_rx) = create_shutdown_channel();
 
-    let mut runtime = WorkerRuntime::new(worker, global_pool, workspace_pool, shutdown_rx, config)?;
+    let mut runtime =
+        WorkerRuntime::new(worker, global_pool, workspace_pool, shutdown_rx, config).await?;
 
     let handle = tokio::spawn(async move { runtime.run().await });
 

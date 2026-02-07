@@ -126,6 +126,46 @@ impl Filter {
     }
 }
 
+impl Filter {
+    /// Convert filter to SQL WHERE clause fragment using json_extract.
+    /// Returns (sql_fragment, json_path, bind_value).
+    pub fn to_sql(&self) -> (String, String, String) {
+        let json_path = self.field_to_json_path();
+        match self.op {
+            FilterOp::Eq => (
+                "json_extract(e.payload, ?) = ?".into(),
+                json_path,
+                self.value.clone(),
+            ),
+            FilterOp::NotEq => (
+                "json_extract(e.payload, ?) != ?".into(),
+                json_path,
+                self.value.clone(),
+            ),
+            FilterOp::Contains => (
+                "json_extract(e.payload, ?) LIKE ?".into(),
+                json_path,
+                format!("%{}%", self.value),
+            ),
+        }
+    }
+
+    /// Convert dot-separated field path to JSON path.
+    /// e.g., "a.b.0.c" -> "$.a.b[0].c"
+    fn field_to_json_path(&self) -> String {
+        let mut path = String::from("$");
+        for part in self.field.split('.') {
+            if part.parse::<usize>().is_ok() {
+                path.push_str(&format!("[{}]", part));
+            } else {
+                path.push('.');
+                path.push_str(part);
+            }
+        }
+        path
+    }
+}
+
 impl std::fmt::Display for Filter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}{}", self.field, self.op.as_str(), self.value)

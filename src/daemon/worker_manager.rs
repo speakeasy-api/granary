@@ -115,7 +115,8 @@ impl WorkerManager {
             workspace_pool,
             shutdown_rx,
             config,
-        )?;
+        )
+        .await?;
 
         // 4. Spawn as tokio task
         let worker_id = worker.id.clone();
@@ -386,7 +387,8 @@ impl WorkerManager {
             workspace_pool,
             shutdown_rx,
             config,
-        )?;
+        )
+        .await?;
 
         // Spawn as tokio task
         let worker_id = worker.id.clone();

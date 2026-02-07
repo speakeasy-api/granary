@@ -610,6 +610,64 @@ fn create_progress_bar(percent: f32, width: usize) -> String {
     format!("[{}{}]", "=".repeat(filled), " ".repeat(empty))
 }
 
+// === Event formatting ===
+
+use crate::models::Event;
+
+#[derive(Tabled)]
+struct EventRow {
+    #[tabled(rename = "ID")]
+    id: String,
+    #[tabled(rename = "Type")]
+    event_type: String,
+    #[tabled(rename = "Entity")]
+    entity: String,
+    #[tabled(rename = "Actor")]
+    actor: String,
+    #[tabled(rename = "Created")]
+    created: String,
+}
+
+impl From<&Event> for EventRow {
+    fn from(e: &Event) -> Self {
+        Self {
+            id: e.id.to_string(),
+            event_type: e.event_type.clone(),
+            entity: format!("{}:{}", e.entity_type, truncate(&e.entity_id, 25)),
+            actor: e.actor.clone().unwrap_or_else(|| "-".to_string()),
+            created: format_date(&e.created_at),
+        }
+    }
+}
+
+pub fn format_event(event: &Event) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("Event: {}\n", event.id));
+    output.push_str(&format!("  Type:       {}\n", event.event_type));
+    output.push_str(&format!(
+        "  Entity:     {} ({})\n",
+        event.entity_id, event.entity_type
+    ));
+    output.push_str(&format!(
+        "  Actor:      {}\n",
+        event.actor.as_deref().unwrap_or("-")
+    ));
+    if let Some(session) = &event.session_id {
+        output.push_str(&format!("  Session:    {}\n", session));
+    }
+    output.push_str(&format!("  Created:    {}\n", event.created_at));
+    output.push_str(&format!("  Payload:    {}\n", event.payload));
+    output
+}
+
+pub fn format_events(events: &[Event]) -> String {
+    if events.is_empty() {
+        return "No events found.\n".to_string();
+    }
+    let rows: Vec<EventRow> = events.iter().map(EventRow::from).collect();
+    Table::new(rows).to_string()
+}
+
 // === Worker formatting ===
 
 use crate::models::Worker;

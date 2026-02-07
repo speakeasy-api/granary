@@ -5,6 +5,7 @@ pub mod comments;
 pub mod config;
 pub mod daemon;
 pub mod entrypoint;
+pub mod events;
 pub mod init;
 pub mod initiate;
 pub mod initiatives;
