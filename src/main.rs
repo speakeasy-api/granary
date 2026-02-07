@@ -24,7 +24,7 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> granary::Result<()> {
-    let format = cli.output_format();
+    let format_override = cli.output_format_override();
 
     let command = match cli.command {
         Some(cmd) => cmd,
@@ -44,19 +44,19 @@ async fn run(cli: Cli) -> granary::Result<()> {
         }
 
         Commands::Plan { name, project } => {
-            plan::plan(name.as_deref(), project).await?;
+            plan::plan(name.as_deref(), project, format_override).await?;
         }
 
         Commands::Work { command } => {
-            work::work(command).await?;
+            work::work(command, format_override).await?;
         }
 
         Commands::Show { id } => {
-            show::show(&id, format).await?;
+            show::show(&id, format_override).await?;
         }
 
         Commands::Projects { action, all } => {
-            projects::projects(action, all, format, cli.watch, cli.interval).await?;
+            projects::projects(action, all, format_override, cli.watch, cli.interval).await?;
         }
 
         Commands::Project { id, action } => {
@@ -67,7 +67,7 @@ async fn run(cli: Cli) -> granary::Result<()> {
                         .to_string(),
                 ));
             }
-            projects::project(&id, action, format).await?;
+            projects::project(&id, action, format_override).await?;
         }
 
         Commands::Tasks {
@@ -81,7 +81,7 @@ async fn run(cli: Cli) -> granary::Result<()> {
                 status,
                 priority,
                 owner,
-                format,
+                format_override,
                 cli.watch,
                 cli.interval,
             )
@@ -89,14 +89,14 @@ async fn run(cli: Cli) -> granary::Result<()> {
         }
 
         Commands::Task { id, action } => {
-            tasks::task(&id, action, format).await?;
+            tasks::task(&id, action, format_override).await?;
         }
 
         Commands::Next {
             include_reason,
             all,
         } => {
-            tasks::next_task(include_reason, all, format).await?;
+            tasks::next_task(include_reason, all, format_override).await?;
         }
 
         Commands::Start {
@@ -104,11 +104,11 @@ async fn run(cli: Cli) -> granary::Result<()> {
             owner,
             lease,
         } => {
-            tasks::start_task(&task_id, owner, lease, format).await?;
+            tasks::start_task(&task_id, owner, lease, format_override).await?;
         }
 
         Commands::Focus { task_id } => {
-            tasks::focus_task(&task_id, format).await?;
+            tasks::focus_task(&task_id, format_override).await?;
         }
 
         Commands::Pin { task_id } => {
@@ -120,23 +120,23 @@ async fn run(cli: Cli) -> granary::Result<()> {
         }
 
         Commands::Sessions { all } => {
-            sessions::list_sessions(all, format, cli.watch, cli.interval).await?;
+            sessions::list_sessions(all, format_override, cli.watch, cli.interval).await?;
         }
 
         Commands::Session { action } => {
-            sessions::session(action, format).await?;
+            sessions::session(action, format_override).await?;
         }
 
         Commands::Summary { token_budget } => {
-            summary::summary(token_budget, format, cli.watch, cli.interval).await?;
+            summary::summary(token_budget, format_override, cli.watch, cli.interval).await?;
         }
 
         Commands::Context { include, max_items } => {
-            summary::context(include, max_items, format).await?;
+            summary::context(include, max_items, format_override).await?;
         }
 
         Commands::Checkpoint { action } => {
-            checkpoints::checkpoint(action, format).await?;
+            checkpoints::checkpoint(action, format_override).await?;
         }
 
         Commands::Handoff {
@@ -145,39 +145,46 @@ async fn run(cli: Cli) -> granary::Result<()> {
             constraints,
             acceptance_criteria,
         } => {
-            summary::handoff(&to, &tasks, constraints, acceptance_criteria, format).await?;
+            summary::handoff(
+                &to,
+                &tasks,
+                constraints,
+                acceptance_criteria,
+                format_override,
+            )
+            .await?;
         }
 
         Commands::Apply { stdin } => {
-            batch::apply(stdin, format).await?;
+            batch::apply(stdin, format_override).await?;
         }
 
         Commands::Batch { stdin } => {
-            batch::batch(stdin, format).await?;
+            batch::batch(stdin, format_override).await?;
         }
 
         Commands::Config { action } => {
-            config::config(action, format).await?;
+            config::config(action, format_override).await?;
         }
 
         Commands::Steering { action } => {
-            config::steering(action, format).await?;
+            config::steering(action, format_override).await?;
         }
 
         Commands::Search { query } => {
-            search::search(&query, format, cli.watch, cli.interval).await?;
+            search::search(&query, format_override, cli.watch, cli.interval).await?;
         }
 
         Commands::Initiatives { action, all } => {
-            initiatives::initiatives(action, all, format, cli.watch, cli.interval).await?;
+            initiatives::initiatives(action, all, format_override, cli.watch, cli.interval).await?;
         }
 
         Commands::Initiative { id, action } => {
-            initiatives::initiative(&id, action, format).await?;
+            initiatives::initiative(&id, action, format_override).await?;
         }
 
         Commands::Initiate { name, description } => {
-            initiate::initiate(&name, description).await?;
+            initiate::initiate(&name, description, format_override).await?;
         }
 
         Commands::Update { check, to } => {
@@ -185,11 +192,11 @@ async fn run(cli: Cli) -> granary::Result<()> {
         }
 
         Commands::Workers { all } => {
-            workers::list_workers(all, format, cli.watch, cli.interval).await?;
+            workers::list_workers(all, format_override, cli.watch, cli.interval).await?;
         }
 
         Commands::Worker { command } => {
-            worker::worker(command, format).await?;
+            worker::worker(command, format_override).await?;
         }
 
         Commands::Runs {
@@ -198,11 +205,20 @@ async fn run(cli: Cli) -> granary::Result<()> {
             all,
             limit,
         } => {
-            run::list_runs(worker, status, all, limit, format, cli.watch, cli.interval).await?;
+            run::list_runs(
+                worker,
+                status,
+                all,
+                limit,
+                format_override,
+                cli.watch,
+                cli.interval,
+            )
+            .await?;
         }
 
         Commands::Run { command } => {
-            run::run(command, format).await?;
+            run::run(command, format_override).await?;
         }
 
         Commands::Daemon { command } => {

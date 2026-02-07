@@ -1,13 +1,101 @@
-use granary_types::{CreateTask, UpdateTask};
+use granary_types::{CreateTask, Task, UpdateTask};
 
-use crate::cli::args::{ArtifactAction, CommentAction, DepsAction, SubtaskAction, TaskAction};
+use crate::cli::args::{
+    ArtifactAction, CliOutputFormat, CommentAction, DepsAction, SubtaskAction, TaskAction,
+};
+use crate::cli::comments::{CommentOutput, CommentsOutput};
+use crate::cli::show::{ArtifactOutput, ArtifactsOutput};
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::db;
 use crate::error::Result;
 use crate::models::*;
-use crate::output::{Formatter, OutputFormat};
+use crate::output::{Output, json, prompt, table};
 use crate::services::{self, Workspace};
 use std::time::Duration;
+
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for a list of tasks with their dependencies
+pub struct TasksOutput {
+    pub tasks: Vec<(Task, Vec<String>)>,
+}
+
+impl Output for TasksOutput {
+    fn to_json(&self) -> String {
+        json::format_tasks_with_deps(&self.tasks)
+    }
+
+    fn to_prompt(&self) -> String {
+        let refs: Vec<(&Task, &[String])> =
+            self.tasks.iter().map(|(t, d)| (t, d.as_slice())).collect();
+        prompt::format_tasks_with_deps(&refs)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_tasks_with_deps(&self.tasks)
+    }
+}
+
+/// Output for the "next task" command
+pub struct NextTaskOutput {
+    pub task: Option<Task>,
+    pub reason: Option<String>,
+}
+
+impl Output for NextTaskOutput {
+    fn to_json(&self) -> String {
+        json::format_next_task(self.task.as_ref(), self.reason.as_deref())
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_next_task(self.task.as_ref(), self.reason.as_deref())
+    }
+
+    fn to_text(&self) -> String {
+        table::format_next_task(self.task.as_ref(), self.reason.as_deref())
+    }
+}
+
+/// Output for a single task with dependencies
+pub struct TaskOutput {
+    pub task: Task,
+    pub blocked_by: Vec<String>,
+}
+
+impl Output for TaskOutput {
+    fn to_json(&self) -> String {
+        json::format_task_with_deps(&self.task, self.blocked_by.clone())
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_task_with_deps(&self.task, &self.blocked_by)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_task_with_deps(&self.task, &self.blocked_by)
+    }
+}
+
+/// Output for task creation confirmation
+pub struct TaskCreatedOutput {
+    pub task: Task,
+}
+
+impl Output for TaskCreatedOutput {
+    fn to_json(&self) -> String {
+        json::format_task(&self.task)
+    }
+
+    fn to_prompt(&self) -> String {
+        format!("Task created: {}", self.task.id)
+    }
+
+    fn to_text(&self) -> String {
+        format!("Task created: {}", self.task.id)
+    }
+}
 
 /// List tasks
 pub async fn list_tasks(
@@ -15,7 +103,7 @@ pub async fn list_tasks(
     status: Option<String>,
     priority: Option<String>,
     owner: Option<String>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
     watch: bool,
     interval: u64,
 ) -> Result<()> {
@@ -27,7 +115,7 @@ pub async fn list_tasks(
                 status.clone(),
                 priority.clone(),
                 owner.clone(),
-                format,
+                cli_format,
             )
             .await?;
             Ok(format!(
@@ -38,7 +126,7 @@ pub async fn list_tasks(
         })
         .await?;
     } else {
-        let output = fetch_and_format_tasks(all, status, priority, owner, format).await?;
+        let output = fetch_and_format_tasks(all, status, priority, owner, cli_format).await?;
         println!("{}", output);
     }
 
@@ -51,7 +139,7 @@ async fn fetch_and_format_tasks(
     status: Option<String>,
     priority: Option<String>,
     owner: Option<String>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<String> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
@@ -87,20 +175,26 @@ async fn fetch_and_format_tasks(
     // Enrich tasks with dependency information
     let tasks_with_deps = services::get_tasks_with_deps(&pool, tasks).await?;
 
-    let formatter = Formatter::new(format);
-    Ok(formatter.format_tasks_with_deps(&tasks_with_deps))
+    let output = TasksOutput {
+        tasks: tasks_with_deps,
+    };
+    Ok(output.format(cli_format))
 }
 
 /// Show or manage a task
-pub async fn task(id: &str, action: Option<TaskAction>, format: OutputFormat) -> Result<()> {
+pub async fn task(
+    id: &str,
+    action: Option<TaskAction>,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
-    let formatter = Formatter::new(format);
 
     match action {
         None => {
             let (task, blocked_by) = services::get_task_with_deps(&pool, id).await?;
-            println!("{}", formatter.format_task_with_deps(&task, blocked_by));
+            let output = TaskOutput { task, blocked_by };
+            println!("{}", output.format(cli_format));
         }
 
         Some(TaskAction::Update {
@@ -132,12 +226,20 @@ pub async fn task(id: &str, action: Option<TaskAction>, format: OutputFormat) ->
             )
             .await?;
 
-            println!("{}", formatter.format_task(&task));
+            let output = TaskOutput {
+                task,
+                blocked_by: vec![],
+            };
+            println!("{}", output.format(cli_format));
         }
 
         Some(TaskAction::Ready) => {
             let task = services::ready_task(&pool, id).await?;
-            println!("{}", formatter.format_task(&task));
+            let output = TaskOutput {
+                task,
+                blocked_by: vec![],
+            };
+            println!("{}", output.format(cli_format));
         }
 
         Some(TaskAction::Start { owner, lease }) => {
@@ -146,27 +248,47 @@ pub async fn task(id: &str, action: Option<TaskAction>, format: OutputFormat) ->
                 let owner_name = owner.unwrap_or_else(|| "unknown".to_string());
                 services::claim_task(&pool, id, &owner_name, Some(minutes)).await?;
             }
-            println!("{}", formatter.format_task(&task));
+            let output = TaskOutput {
+                task,
+                blocked_by: vec![],
+            };
+            println!("{}", output.format(cli_format));
         }
 
         Some(TaskAction::Done { comment }) => {
             let task = services::complete_task(&pool, id, comment.as_deref()).await?;
-            println!("{}", formatter.format_task(&task));
+            let output = TaskOutput {
+                task,
+                blocked_by: vec![],
+            };
+            println!("{}", output.format(cli_format));
         }
 
         Some(TaskAction::Block { reason }) => {
             let task = services::block_task(&pool, id, &reason).await?;
-            println!("{}", formatter.format_task(&task));
+            let output = TaskOutput {
+                task,
+                blocked_by: vec![],
+            };
+            println!("{}", output.format(cli_format));
         }
 
         Some(TaskAction::Unblock) => {
             let task = services::unblock_task(&pool, id).await?;
-            println!("{}", formatter.format_task(&task));
+            let output = TaskOutput {
+                task,
+                blocked_by: vec![],
+            };
+            println!("{}", output.format(cli_format));
         }
 
         Some(TaskAction::Claim { owner, lease }) => {
             let task = services::claim_task(&pool, id, &owner, lease).await?;
-            println!("{}", formatter.format_task(&task));
+            let output = TaskOutput {
+                task,
+                blocked_by: vec![],
+            };
+            println!("{}", output.format(cli_format));
         }
 
         Some(TaskAction::Heartbeat { lease }) => {
@@ -180,13 +302,19 @@ pub async fn task(id: &str, action: Option<TaskAction>, format: OutputFormat) ->
         }
 
         Some(TaskAction::Deps { action }) => {
-            handle_deps(id, action, &pool, format).await?;
+            handle_deps(id, action, &pool, cli_format).await?;
         }
 
         Some(TaskAction::Tasks { action }) => match action {
             None => {
                 let subtasks = services::list_subtasks(&pool, id).await?;
-                println!("{}", formatter.format_tasks(&subtasks));
+                // Convert to tasks with empty deps for output
+                let tasks_with_deps: Vec<(Task, Vec<String>)> =
+                    subtasks.into_iter().map(|t| (t, vec![])).collect();
+                let output = TasksOutput {
+                    tasks: tasks_with_deps,
+                };
+                println!("{}", output.format(cli_format));
             }
             Some(SubtaskAction::Create {
                 title,
@@ -211,14 +339,16 @@ pub async fn task(id: &str, action: Option<TaskAction>, format: OutputFormat) ->
                 )
                 .await?;
 
-                println!("{}", formatter.format_task_created(&subtask));
+                let output = TaskCreatedOutput { task: subtask };
+                println!("{}", output.format(cli_format));
             }
         },
 
         Some(TaskAction::Comments { action }) => match action {
             None => {
                 let comments = db::comments::list_by_parent(&pool, id).await?;
-                println!("{}", formatter.format_comments(&comments));
+                let output = CommentsOutput { comments };
+                println!("{}", output.format(cli_format));
             }
             Some(CommentAction::Create {
                 content_positional,
@@ -232,14 +362,16 @@ pub async fn task(id: &str, action: Option<TaskAction>, format: OutputFormat) ->
                         "content is required (provide as positional argument or with --content flag)".to_string()
                     ))?;
                 let comment = create_comment(&pool, id, &content, &kind, author).await?;
-                println!("{}", formatter.format_comment(&comment));
+                let output = CommentOutput { comment };
+                println!("{}", output.format(cli_format));
             }
         },
 
         Some(TaskAction::Artifacts { action }) => match action {
             None => {
                 let artifacts = db::artifacts::list_by_parent(&pool, id).await?;
-                println!("{}", formatter.format_artifacts(&artifacts));
+                let output = ArtifactsOutput { artifacts };
+                println!("{}", output.format(cli_format));
             }
             Some(ArtifactAction::Add {
                 artifact_type,
@@ -248,7 +380,8 @@ pub async fn task(id: &str, action: Option<TaskAction>, format: OutputFormat) ->
             }) => {
                 let artifact =
                     create_artifact(&pool, id, &artifact_type, &path, description).await?;
-                println!("{}", formatter.format_artifact(&artifact));
+                let output = ArtifactOutput { artifact };
+                println!("{}", output.format(cli_format));
             }
             Some(ArtifactAction::Rm { artifact_id }) => {
                 db::artifacts::delete(&pool, &artifact_id).await?;
@@ -264,7 +397,7 @@ async fn handle_deps(
     task_id: &str,
     action: DepsAction,
     pool: &sqlx::SqlitePool,
-    _format: OutputFormat,
+    _cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     match action {
         DepsAction::Add { task_ids } => {
@@ -301,7 +434,11 @@ async fn handle_deps(
 }
 
 /// Get next actionable task
-pub async fn next_task(include_reason: bool, all: bool, format: OutputFormat) -> Result<()> {
+pub async fn next_task(
+    include_reason: bool,
+    all: bool,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -313,23 +450,30 @@ pub async fn next_task(include_reason: bool, all: bool, format: OutputFormat) ->
         None
     };
 
-    let formatter = Formatter::new(format);
-
     if all {
         // Get all available tasks
         let tasks = services::get_all_next_tasks(&pool, project_ids.as_deref()).await?;
-        println!("{}", formatter.format_tasks(&tasks));
+        // For all tasks, enrich with dependencies
+        let tasks_with_deps = services::get_tasks_with_deps(&pool, tasks).await?;
+        let output = TasksOutput {
+            tasks: tasks_with_deps,
+        };
+        println!("{}", output.format(cli_format));
     } else {
         // Get single next task
         let task = services::get_next_task(&pool, project_ids.as_deref()).await?;
 
         let reason = if include_reason {
-            Some("Selected based on: priority, due date, creation time; all dependencies satisfied")
+            Some(
+                "Selected based on: priority, due date, creation time; all dependencies satisfied"
+                    .to_string(),
+            )
         } else {
             None
         };
 
-        println!("{}", formatter.format_next_task(task.as_ref(), reason));
+        let output = NextTaskOutput { task, reason };
+        println!("{}", output.format(cli_format));
     }
 
     Ok(())
@@ -340,7 +484,7 @@ pub async fn start_task(
     task_id: &str,
     owner: Option<String>,
     lease: Option<u32>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
@@ -357,14 +501,17 @@ pub async fn start_task(
         services::set_focus_task(&pool, &session_id, task_id).await?;
     }
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_task(&task));
+    let output = TaskOutput {
+        task,
+        blocked_by: vec![],
+    };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }
 
 /// Focus on a task
-pub async fn focus_task(task_id: &str, format: OutputFormat) -> Result<()> {
+pub async fn focus_task(task_id: &str, cli_format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -375,9 +522,12 @@ pub async fn focus_task(task_id: &str, format: OutputFormat) -> Result<()> {
     services::set_focus_task(&pool, &session_id, task_id).await?;
 
     let task = services::get_task(&pool, task_id).await?;
-    let formatter = Formatter::new(format);
     println!("Focus set to: {}", task.title);
-    println!("{}", formatter.format_task(&task));
+    let output = TaskOutput {
+        task,
+        blocked_by: vec![],
+    };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }

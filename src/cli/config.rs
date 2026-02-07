@@ -1,13 +1,12 @@
-use crate::cli::args::{ConfigAction, RunnersAction, SteeringAction};
+use crate::cli::args::{CliOutputFormat, ConfigAction, RunnersAction, SteeringAction};
 use crate::db;
 use crate::error::Result;
 use crate::models::RunnerConfig;
-use crate::output::OutputFormat;
 use crate::services::{Workspace, global_config_service};
 use std::collections::HashMap;
 
 /// Handle config subcommands
-pub async fn config(action: ConfigAction, format: OutputFormat) -> Result<()> {
+pub async fn config(action: ConfigAction, format: Option<CliOutputFormat>) -> Result<()> {
     match action {
         // Workspace-level config commands need workspace
         ConfigAction::Get { key } => {
@@ -31,7 +30,7 @@ pub async fn config(action: ConfigAction, format: OutputFormat) -> Result<()> {
             let workspace = Workspace::find()?;
             let pool = workspace.pool().await?;
             let items = db::config::list(&pool).await?;
-            if format == OutputFormat::Json {
+            if matches!(format, Some(CliOutputFormat::Json)) {
                 // Convert to array of objects for GUI consumption
                 let entries: Vec<serde_json::Value> = items
                     .iter()
@@ -76,12 +75,15 @@ pub async fn config(action: ConfigAction, format: OutputFormat) -> Result<()> {
 }
 
 /// Handle runners subcommands
-async fn handle_runners_action(action: Option<RunnersAction>, format: OutputFormat) -> Result<()> {
+async fn handle_runners_action(
+    action: Option<RunnersAction>,
+    format: Option<CliOutputFormat>,
+) -> Result<()> {
     match action {
         None => {
             // List all runners
             let config = global_config_service::load()?;
-            if format == OutputFormat::Json {
+            if matches!(format, Some(CliOutputFormat::Json)) {
                 // Output as JSON for programmatic access (e.g., GUI)
                 let json = serde_json::to_string(&config.runners)?;
                 println!("{}", json);
@@ -225,7 +227,7 @@ fn parse_env_vars(env_vars: &[String]) -> HashMap<String, String> {
 }
 
 /// Handle steering subcommands
-pub async fn steering(action: SteeringAction, format: OutputFormat) -> Result<()> {
+pub async fn steering(action: SteeringAction, format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -233,7 +235,7 @@ pub async fn steering(action: SteeringAction, format: OutputFormat) -> Result<()
         SteeringAction::List => {
             let files = db::steering::list(&pool).await?;
 
-            if format == OutputFormat::Json {
+            if matches!(format, Some(CliOutputFormat::Json)) {
                 let json = serde_json::to_string(&files)?;
                 println!("{}", json);
             } else if files.is_empty() {

@@ -1,20 +1,85 @@
-use granary_types::{CreateProject, CreateTask, UpdateProject};
+use granary_types::{CreateProject, CreateTask, Project, Task, UpdateProject};
 
 use crate::cli::args::{
-    ProjectAction, ProjectDepsAction, ProjectSteerAction, ProjectTasksAction, ProjectsAction,
+    CliOutputFormat, ProjectAction, ProjectDepsAction, ProjectSteerAction, ProjectTasksAction,
+    ProjectsAction,
 };
+use crate::cli::tasks::TaskCreatedOutput;
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::db;
 use crate::error::Result;
-use crate::output::{Formatter, OutputFormat};
+use crate::output::{Output, json, prompt, table};
 use crate::services::{self, Workspace};
 use std::time::Duration;
+
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for a list of projects
+pub struct ProjectsOutput {
+    pub projects: Vec<Project>,
+}
+
+impl Output for ProjectsOutput {
+    fn to_json(&self) -> String {
+        json::format_projects(&self.projects)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_projects(&self.projects)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_projects(&self.projects)
+    }
+}
+
+/// Output for a single project
+pub struct ProjectOutput {
+    pub project: Project,
+}
+
+impl Output for ProjectOutput {
+    fn to_json(&self) -> String {
+        json::format_project(&self.project)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_project(&self.project)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_project(&self.project)
+    }
+}
+
+/// Output for a list of tasks with dependencies (used in project tasks listing)
+pub struct ProjectTasksOutput {
+    pub tasks: Vec<(Task, Vec<String>)>,
+}
+
+impl Output for ProjectTasksOutput {
+    fn to_json(&self) -> String {
+        json::format_tasks_with_deps(&self.tasks)
+    }
+
+    fn to_prompt(&self) -> String {
+        let refs: Vec<(&Task, &[String])> =
+            self.tasks.iter().map(|(t, d)| (t, d.as_slice())).collect();
+        prompt::format_tasks_with_deps(&refs)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_tasks_with_deps(&self.tasks)
+    }
+}
 
 /// Handle projects command (list or create)
 pub async fn projects(
     action: Option<ProjectsAction>,
     include_archived: bool,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
     watch: bool,
     interval: u64,
 ) -> Result<()> {
@@ -24,7 +89,7 @@ pub async fn projects(
             if watch {
                 let interval_duration = Duration::from_secs(interval);
                 watch_loop(interval_duration, || async {
-                    let output = fetch_and_format_projects(include_archived, format)
+                    let output = fetch_and_format_projects(include_archived, cli_format)
                         .await
                         .map_err(|e| anyhow::anyhow!("{}", e))?;
                     Ok(format!(
@@ -36,7 +101,7 @@ pub async fn projects(
                 .await?;
                 Ok(())
             } else {
-                let output = fetch_and_format_projects(include_archived, format).await?;
+                let output = fetch_and_format_projects(include_archived, cli_format).await?;
                 println!("{}", output);
                 Ok(())
             }
@@ -46,22 +111,29 @@ pub async fn projects(
             description,
             owner,
             tags,
-        }) => create_project(&name, description, owner, tags, format).await,
+        }) => create_project(&name, description, owner, tags, cli_format).await,
     }
 }
 
 /// Fetch and format all projects as a string
-async fn fetch_and_format_projects(include_archived: bool, format: OutputFormat) -> Result<String> {
+async fn fetch_and_format_projects(
+    include_archived: bool,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<String> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
     let projects = services::list_projects(&pool, include_archived).await?;
-    let formatter = Formatter::new(format);
-    Ok(formatter.format_projects(&projects))
+    let output = ProjectsOutput { projects };
+    Ok(output.format(cli_format))
 }
 
 /// Show or manage a project
-pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputFormat) -> Result<()> {
+pub async fn project(
+    id: &str,
+    action: Option<ProjectAction>,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -72,13 +144,12 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
         ));
     }
 
-    let formatter = Formatter::new(format);
-
     match action {
         None => {
             // Show project details
             let project = services::get_project(&pool, id).await?;
-            println!("{}", formatter.format_project(&project));
+            let output = ProjectOutput { project };
+            println!("{}", output.format(cli_format));
         }
 
         Some(ProjectAction::Update {
@@ -102,7 +173,8 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
             )
             .await?;
 
-            println!("{}", formatter.format_project(&project));
+            let output = ProjectOutput { project };
+            println!("{}", output.format(cli_format));
         }
 
         Some(ProjectAction::Archive) => {
@@ -116,7 +188,10 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
                     // List tasks with dependency info
                     let tasks = services::list_tasks_by_project(&pool, id).await?;
                     let tasks_with_deps = services::get_tasks_with_deps(&pool, tasks).await?;
-                    println!("{}", formatter.format_tasks_with_deps(&tasks_with_deps));
+                    let output = ProjectTasksOutput {
+                        tasks: tasks_with_deps,
+                    };
+                    println!("{}", output.format(cli_format));
                 }
                 Some(ProjectTasksAction::Create {
                     title,
@@ -157,13 +232,14 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
                         }
                     }
 
-                    println!("{}", formatter.format_task_created(&task));
+                    let output = TaskCreatedOutput { task };
+                    println!("{}", output.format(cli_format));
                 }
             }
         }
 
         Some(ProjectAction::Deps { action }) => {
-            handle_deps_action(&pool, id, action, format).await?;
+            handle_deps_action(&pool, id, action, cli_format).await?;
         }
 
         Some(ProjectAction::Summary) => {
@@ -231,10 +307,8 @@ async fn handle_deps_action(
     pool: &sqlx::SqlitePool,
     project_id: &str,
     action: ProjectDepsAction,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
-    let formatter = Formatter::new(format);
-
     match action {
         ProjectDepsAction::Add { depends_on_id } => {
             // Verify both projects exist
@@ -270,7 +344,8 @@ async fn handle_deps_action(
                 println!("No dependencies for project {}", project_id);
             } else {
                 println!("Dependencies for {}:", project_id);
-                println!("{}", formatter.format_projects(&deps));
+                let output = ProjectsOutput { projects: deps };
+                println!("{}", output.format(cli_format));
             }
         }
 
@@ -328,7 +403,7 @@ pub async fn create_project(
     description: Option<String>,
     owner: Option<String>,
     tags: Option<String>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
@@ -349,8 +424,8 @@ pub async fn create_project(
     )
     .await?;
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_project(&project));
+    let output = ProjectOutput { project };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }

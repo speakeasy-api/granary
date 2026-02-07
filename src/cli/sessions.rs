@@ -1,48 +1,92 @@
-use crate::cli::args::SessionAction;
+use crate::cli::args::{CliOutputFormat, SessionAction};
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::error::{GranaryError, Result};
 use crate::models::*;
-use crate::output::{Formatter, OutputFormat};
+use crate::output::{Output, json, prompt, table};
 use crate::services::{self, Workspace};
 use std::time::Duration;
+
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for a list of sessions
+pub struct SessionsOutput {
+    pub sessions: Vec<Session>,
+}
+
+impl Output for SessionsOutput {
+    fn to_json(&self) -> String {
+        json::format_sessions(&self.sessions)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_sessions(&self.sessions)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_sessions(&self.sessions)
+    }
+}
+
+/// Output for a single session
+pub struct SessionOutput {
+    pub session: Session,
+}
+
+impl Output for SessionOutput {
+    fn to_json(&self) -> String {
+        json::format_session(&self.session)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_session(&self.session)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_session(&self.session)
+    }
+}
 
 /// List sessions
 pub async fn list_sessions(
     include_closed: bool,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
     watch: bool,
     interval: u64,
 ) -> Result<()> {
     if watch {
         let interval = Duration::from_secs(interval);
         watch_loop(interval, || async {
-            let output = fetch_and_format_sessions(include_closed, format).await?;
+            let output = fetch_and_format_sessions(include_closed, cli_format).await?;
             Ok(format!("{}\n{}", watch_status_line(interval), output))
         })
         .await
     } else {
-        let output = fetch_and_format_sessions(include_closed, format).await?;
+        let output = fetch_and_format_sessions(include_closed, cli_format).await?;
         println!("{}", output);
         Ok(())
     }
 }
 
 /// Fetch sessions and format them as a string
-async fn fetch_and_format_sessions(include_closed: bool, format: OutputFormat) -> Result<String> {
+async fn fetch_and_format_sessions(
+    include_closed: bool,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<String> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
     let sessions = services::list_sessions(&pool, include_closed).await?;
 
-    let formatter = Formatter::new(format);
-    Ok(formatter.format_sessions(&sessions))
+    let output = SessionsOutput { sessions };
+    Ok(output.format(cli_format))
 }
 
 /// Handle session subcommands
-pub async fn session(action: SessionAction, format: OutputFormat) -> Result<()> {
+pub async fn session(action: SessionAction, cli_format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
-    let formatter = Formatter::new(format);
 
     match action {
         SessionAction::Start { name, owner, mode } => {
@@ -62,7 +106,8 @@ pub async fn session(action: SessionAction, format: OutputFormat) -> Result<()> 
             workspace.set_current_session(&session.id)?;
 
             println!("Started session: {}", session.id);
-            println!("{}", formatter.format_session(&session));
+            let output = SessionOutput { session };
+            println!("{}", output.format(cli_format));
             eprintln!(
                 "\nIMPORTANT: Remember to close this session when done with: granary session close --summary \"your summary here...\""
             );
@@ -71,7 +116,10 @@ pub async fn session(action: SessionAction, format: OutputFormat) -> Result<()> 
         SessionAction::Current => {
             match services::get_current_session(&pool, &workspace).await? {
                 Some(session) => {
-                    println!("{}", formatter.format_session(&session));
+                    let output = SessionOutput {
+                        session: session.clone(),
+                    };
+                    println!("{}", output.format(cli_format));
 
                     // Also show scope
                     let scope = services::get_scope(&pool, &session.id).await?;
@@ -101,7 +149,8 @@ pub async fn session(action: SessionAction, format: OutputFormat) -> Result<()> 
 
             workspace.set_current_session(&session_id)?;
             println!("Now using session: {}", session_id);
-            println!("{}", formatter.format_session(&session));
+            let output = SessionOutput { session };
+            println!("{}", output.format(cli_format));
         }
 
         SessionAction::Close {

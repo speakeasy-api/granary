@@ -1,7 +1,59 @@
+use crate::cli::args::CliOutputFormat;
+use crate::cli::checkpoints::CheckpointOutput;
+use crate::cli::comments::CommentOutput;
+use crate::cli::initiatives::InitiativeOutput;
+use crate::cli::projects::ProjectOutput;
+use crate::cli::sessions::SessionOutput;
+use crate::cli::tasks::TaskOutput;
 use crate::db;
 use crate::error::{GranaryError, Result};
-use crate::output::{Formatter, OutputFormat};
+use crate::models::Artifact;
+use crate::output::{Output, json, table};
 use crate::services::{self, Workspace};
+
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for a single artifact
+pub struct ArtifactOutput {
+    pub artifact: Artifact,
+}
+
+impl Output for ArtifactOutput {
+    fn to_json(&self) -> String {
+        json::format_artifact(&self.artifact)
+    }
+
+    fn to_prompt(&self) -> String {
+        // Artifacts don't have a prompt formatter, use table format
+        table::format_artifact(&self.artifact)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_artifact(&self.artifact)
+    }
+}
+
+/// Output for a list of artifacts
+pub struct ArtifactsOutput {
+    pub artifacts: Vec<Artifact>,
+}
+
+impl Output for ArtifactsOutput {
+    fn to_json(&self) -> String {
+        json::format_artifacts(&self.artifacts)
+    }
+
+    fn to_prompt(&self) -> String {
+        // Artifacts don't have a prompt formatter, use table format
+        table::format_artifacts(&self.artifacts)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_artifacts(&self.artifacts)
+    }
+}
 
 /// Detected entity type from an ID
 #[derive(Debug, Clone, PartialEq)]
@@ -47,10 +99,9 @@ pub fn detect_entity_kind(id: &str) -> EntityKind {
 }
 
 /// Show an entity by ID, auto-detecting its type
-pub async fn show(id: &str, format: OutputFormat) -> Result<()> {
+pub async fn show(id: &str, cli_format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
-    let formatter = Formatter::new(format);
 
     let kind = detect_entity_kind(id);
 
@@ -58,28 +109,33 @@ pub async fn show(id: &str, format: OutputFormat) -> Result<()> {
         EntityKind::Initiative => {
             // This case is used when explicitly looking up initiatives
             let initiative = services::get_initiative_or_error(&pool, id).await?;
-            println!("{}", formatter.format_initiative(&initiative));
+            let output = InitiativeOutput { initiative };
+            println!("{}", output.format(cli_format));
         }
 
         EntityKind::Project => {
             // Since Initiative and Project share the same ID pattern,
             // try Initiative first, then fall back to Project
             if let Some(initiative) = services::get_initiative(&pool, id).await? {
-                println!("{}", formatter.format_initiative(&initiative));
+                let output = InitiativeOutput { initiative };
+                println!("{}", output.format(cli_format));
             } else {
                 let project = services::get_project(&pool, id).await?;
-                println!("{}", formatter.format_project(&project));
+                let output = ProjectOutput { project };
+                println!("{}", output.format(cli_format));
             }
         }
 
         EntityKind::Task => {
             let (task, blocked_by) = services::get_task_with_deps(&pool, id).await?;
-            println!("{}", formatter.format_task_with_deps(&task, blocked_by));
+            let output = TaskOutput { task, blocked_by };
+            println!("{}", output.format(cli_format));
         }
 
         EntityKind::Session => {
             let session = services::get_session(&pool, id).await?;
-            println!("{}", formatter.format_session(&session));
+            let output = SessionOutput { session };
+            println!("{}", output.format(cli_format));
 
             // Also show scope
             let scope = services::get_scope(&pool, id).await?;
@@ -93,21 +149,24 @@ pub async fn show(id: &str, format: OutputFormat) -> Result<()> {
 
         EntityKind::Checkpoint => {
             let checkpoint = services::get_checkpoint(&pool, id).await?;
-            println!("{}", formatter.format_checkpoint(&checkpoint));
+            let output = CheckpointOutput { checkpoint };
+            println!("{}", output.format(cli_format));
         }
 
         EntityKind::Comment => {
             let comment = db::comments::get(&pool, id)
                 .await?
                 .ok_or_else(|| GranaryError::CommentNotFound(id.to_string()))?;
-            println!("{}", formatter.format_comment(&comment));
+            let output = CommentOutput { comment };
+            println!("{}", output.format(cli_format));
         }
 
         EntityKind::Artifact => {
             let artifact = db::artifacts::get(&pool, id)
                 .await?
                 .ok_or_else(|| GranaryError::ArtifactNotFound(id.to_string()))?;
-            println!("{}", formatter.format_artifact(&artifact));
+            let output = ArtifactOutput { artifact };
+            println!("{}", output.format(cli_format));
         }
     }
 

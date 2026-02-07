@@ -8,14 +8,15 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::cli::args::WorkerCommand;
+use crate::cli::args::{CliOutputFormat, WorkerCommand};
+use crate::cli::workers::WorkerOutput;
 use crate::daemon::{LogTarget, StartWorkerRequest, ensure_daemon};
 use crate::error::{GranaryError, Result};
-use crate::output::{Formatter, OutputFormat};
+use crate::output::Output;
 use crate::services::{Workspace, global_config_service};
 
 /// Handle worker commands
-pub async fn worker(command: WorkerCommand, format: OutputFormat) -> Result<()> {
+pub async fn worker(command: WorkerCommand, cli_format: Option<CliOutputFormat>) -> Result<()> {
     match command {
         WorkerCommand::Start {
             runner,
@@ -36,18 +37,18 @@ pub async fn worker(command: WorkerCommand, format: OutputFormat) -> Result<()> 
                 detached,
                 concurrency,
                 poll_cooldown_secs: poll_cooldown,
-                format,
+                cli_format,
             })
             .await
         }
-        WorkerCommand::Status { worker_id } => show_status(&worker_id, format).await,
+        WorkerCommand::Status { worker_id } => show_status(&worker_id, cli_format).await,
         WorkerCommand::Logs {
             worker_id,
             follow,
             lines,
         } => show_logs(&worker_id, follow, lines).await,
-        WorkerCommand::Stop { worker_id, runs } => stop_worker(&worker_id, runs, format).await,
-        WorkerCommand::Prune => prune_workers(format).await,
+        WorkerCommand::Stop { worker_id, runs } => stop_worker(&worker_id, runs, cli_format).await,
+        WorkerCommand::Prune => prune_workers().await,
     }
 }
 
@@ -60,7 +61,7 @@ struct StartWorkerArgs {
     detached: bool,
     concurrency: u32,
     poll_cooldown_secs: i64,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 }
 
 /// Start a new worker via the daemon
@@ -74,7 +75,7 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
         detached,
         concurrency,
         poll_cooldown_secs,
-        format,
+        cli_format,
     } = args;
 
     // Validate we have either a runner or an inline command
@@ -153,8 +154,10 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
 
     let worker = client.start_worker(req).await?;
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_worker(&worker));
+    let output = WorkerOutput {
+        worker: worker.clone(),
+    };
+    println!("{}", output.format(cli_format));
 
     if !detached {
         // Stream logs until Ctrl+C
@@ -201,15 +204,15 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
 }
 
 /// Show worker status via the daemon
-async fn show_status(worker_id: &str, format: OutputFormat) -> Result<()> {
+async fn show_status(worker_id: &str, cli_format: Option<CliOutputFormat>) -> Result<()> {
     // Connect to daemon (auto-starts if needed)
     let mut client = ensure_daemon().await?;
 
     // Get worker from daemon
     let worker = client.get_worker(worker_id).await?;
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_worker(&worker));
+    let output = WorkerOutput { worker };
+    println!("{}", output.format(cli_format));
 
     // Get run statistics via daemon
     let runs = client.list_runs(Some(worker_id), None, true).await?;
@@ -391,7 +394,11 @@ pub async fn follow_log(path: &PathBuf, initial_lines: usize) -> Result<()> {
 }
 
 /// Stop a worker via the daemon
-async fn stop_worker(worker_id: &str, stop_runs: bool, format: OutputFormat) -> Result<()> {
+async fn stop_worker(
+    worker_id: &str,
+    stop_runs: bool,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     // Connect to daemon (auto-starts if needed)
     let mut client = ensure_daemon().await?;
 
@@ -401,15 +408,15 @@ async fn stop_worker(worker_id: &str, stop_runs: bool, format: OutputFormat) -> 
     // Get updated worker status from daemon
     let worker = client.get_worker(worker_id).await?;
 
-    let formatter = Formatter::new(format);
+    let output = WorkerOutput { worker };
     println!("Worker stopped.");
-    println!("{}", formatter.format_worker(&worker));
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }
 
 /// Prune stopped/errored workers via the daemon
-async fn prune_workers(_format: OutputFormat) -> Result<()> {
+async fn prune_workers() -> Result<()> {
     // Connect to daemon (auto-starts if needed)
     let mut client = ensure_daemon().await?;
 

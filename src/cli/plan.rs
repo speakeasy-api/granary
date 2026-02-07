@@ -1,12 +1,129 @@
 use granary_types::{CreateProject, Project, Task};
+use serde::Serialize;
 
+use crate::cli::args::CliOutputFormat;
 use crate::db;
 use crate::error::Result;
+use crate::output::{Output, OutputType};
 use crate::services::{self, Workspace};
+
+/// Output for a new project plan with prior art
+pub struct PlanOutput {
+    pub project: Project,
+    pub prior_art: Vec<ProjectWithProgress>,
+}
+
+/// Output for planning an existing project (sub-agent mode)
+pub struct ExistingPlanOutput {
+    pub project: Project,
+    pub tasks: Vec<Task>,
+}
+
+impl Output for PlanOutput {
+    fn output_type() -> OutputType {
+        OutputType::Prompt // LLM-first commands default to Prompt
+    }
+
+    fn to_json(&self) -> String {
+        let json_output = PlanJsonOutput {
+            project_id: &self.project.id,
+            project_name: &self.project.name,
+            prior_art: self
+                .prior_art
+                .iter()
+                .map(|p| PriorArtJson {
+                    id: &p.project.id,
+                    name: &p.project.name,
+                    description: p.project.description.as_deref(),
+                    done_count: p.done_count,
+                    total_count: p.total_count,
+                })
+                .collect(),
+        };
+        serde_json::to_string_pretty(&json_output).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        format_planning_guidance(&self.project, &self.prior_art)
+    }
+
+    fn to_text(&self) -> String {
+        format!("Created project: {}", self.project.id)
+    }
+}
+
+impl Output for ExistingPlanOutput {
+    fn output_type() -> OutputType {
+        OutputType::Prompt // LLM-first commands default to Prompt
+    }
+
+    fn to_json(&self) -> String {
+        let json_output = ExistingPlanJsonOutput {
+            project_id: &self.project.id,
+            project_name: &self.project.name,
+            description: self.project.description.as_deref(),
+            tasks: self
+                .tasks
+                .iter()
+                .map(|t| TaskSummaryJson {
+                    id: &t.id,
+                    title: &t.title,
+                    status: &t.status,
+                    priority: &t.priority,
+                })
+                .collect(),
+        };
+        serde_json::to_string_pretty(&json_output).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        format_existing_project_guidance(&self.project, &self.tasks)
+    }
+
+    fn to_text(&self) -> String {
+        format!("Project: {} ({})", self.project.name, self.project.id)
+    }
+}
+
+#[derive(Serialize)]
+struct PlanJsonOutput<'a> {
+    project_id: &'a str,
+    project_name: &'a str,
+    prior_art: Vec<PriorArtJson<'a>>,
+}
+
+#[derive(Serialize)]
+struct PriorArtJson<'a> {
+    id: &'a str,
+    name: &'a str,
+    description: Option<&'a str>,
+    done_count: usize,
+    total_count: usize,
+}
+
+#[derive(Serialize)]
+struct ExistingPlanJsonOutput<'a> {
+    project_id: &'a str,
+    project_name: &'a str,
+    description: Option<&'a str>,
+    tasks: Vec<TaskSummaryJson<'a>>,
+}
+
+#[derive(Serialize)]
+struct TaskSummaryJson<'a> {
+    id: &'a str,
+    title: &'a str,
+    status: &'a str,
+    priority: &'a str,
+}
 
 /// Handle the plan command - creates a project and outputs guidance for task creation
 /// Note: clap ensures exactly one of `name` or `existing_project` is provided
-pub async fn plan(name: Option<&str>, existing_project: Option<String>) -> Result<()> {
+pub async fn plan(
+    name: Option<&str>,
+    existing_project: Option<String>,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -14,7 +131,8 @@ pub async fn plan(name: Option<&str>, existing_project: Option<String>) -> Resul
         // Existing project mode - for sub-agents planning initiative projects
         let project = services::get_project(&pool, &project_id).await?;
         let tasks = services::list_tasks_by_project(&pool, &project_id).await?;
-        print_existing_project_guidance(&project, &tasks);
+        let output = ExistingPlanOutput { project, tasks };
+        println!("{}", output.format(cli_format));
     } else if let Some(name) = name {
         // New project mode - creates project and guides task creation
         let project = services::create_project(
@@ -33,7 +151,8 @@ pub async fn plan(name: Option<&str>, existing_project: Option<String>) -> Resul
         let prior_art = find_prior_art(&pool, name).await?;
 
         // Output the guidance
-        print_planning_guidance(&project, &prior_art);
+        let output = PlanOutput { project, prior_art };
+        println!("{}", output.format(cli_format));
     }
 
     Ok(())
@@ -61,21 +180,21 @@ async fn find_prior_art(pool: &sqlx::SqlitePool, query: &str) -> Result<Vec<Proj
     Ok(prior_art)
 }
 
-struct ProjectWithProgress {
-    project: Project,
-    done_count: usize,
-    total_count: usize,
+pub struct ProjectWithProgress {
+    pub project: Project,
+    pub done_count: usize,
+    pub total_count: usize,
 }
 
-fn print_planning_guidance(project: &Project, prior_art: &[ProjectWithProgress]) {
-    println!("Project created: {}", project.id);
-    println!();
+fn format_planning_guidance(project: &Project, prior_art: &[ProjectWithProgress]) -> String {
+    let mut output = String::new();
+
+    output.push_str(&format!("Project created: {}\n\n", project.id));
 
     // Prior Art section
-    println!("## Prior Art");
-    println!();
+    output.push_str("## Prior Art\n\n");
     if prior_art.is_empty() {
-        println!("No similar projects found.");
+        output.push_str("No similar projects found.\n");
     } else {
         for p in prior_art {
             let status = if p.done_count == p.total_count && p.total_count > 0 {
@@ -85,29 +204,26 @@ fn print_planning_guidance(project: &Project, prior_art: &[ProjectWithProgress])
             } else {
                 "(no tasks)".to_string()
             };
-            println!("- {}: {} {}", p.project.id, p.project.name, status);
+            output.push_str(&format!(
+                "- {}: {} {}\n",
+                p.project.id, p.project.name, status
+            ));
         }
     }
-    println!();
-    println!("View details:");
-    println!("  granary show <project-id>");
-    println!();
+    output.push_str("\nView details:\n");
+    output.push_str("  granary show <project-id>\n\n");
 
     // Research section
-    println!("## Research");
-    println!();
-    println!("Before creating tasks, research the codebase:");
-    println!("- Find all files that need modification (exact paths, line numbers)");
-    println!("- Document existing patterns to follow");
-    println!("- Identify test patterns to replicate");
-    println!();
+    output.push_str("## Research\n\n");
+    output.push_str("Before creating tasks, research the codebase:\n");
+    output.push_str("- Find all files that need modification (exact paths, line numbers)\n");
+    output.push_str("- Document existing patterns to follow\n");
+    output.push_str("- Identify test patterns to replicate\n\n");
 
     // Create Tasks section
-    println!("## Create Tasks");
-    println!();
-    println!("Task descriptions are the ONLY context workers receive.");
-    println!();
-    println!(
+    output.push_str("## Create Tasks\n\n");
+    output.push_str("Task descriptions are the ONLY context workers receive.\n\n");
+    output.push_str(&format!(
         r#"  granary project {} tasks create "Task title" --priority P1 --description "
   **Goal:** What this accomplishes
 
@@ -121,48 +237,46 @@ fn print_planning_guidance(project: &Project, prior_art: &[ProjectWithProgress])
 
   **Acceptance criteria:**
   - [ ] Criterion 1
-  ""#,
+  "
+"#,
         project.id
-    );
-    println!();
+    ));
 
     // Set Dependencies section
-    println!("## Set Dependencies");
-    println!();
-    println!("  granary task <task-id> deps add <other-task-id>");
-    println!();
+    output.push_str("## Set Dependencies\n\n");
+    output.push_str("  granary task <task-id> deps add <other-task-id>\n\n");
 
     // Attach Steering Files section
-    println!("## Attach Steering Files");
-    println!();
-    println!("  granary steering add <path> --project {}", project.id);
-    println!();
+    output.push_str("## Attach Steering Files\n\n");
+    output.push_str(&format!(
+        "  granary steering add <path> --project {}\n\n",
+        project.id
+    ));
 
     // Finish section
-    println!("## Finish");
-    println!();
-    println!("  granary project {} ready", project.id);
+    output.push_str("## Finish\n\n");
+    output.push_str(&format!("  granary project {} ready", project.id));
+
+    output
 }
 
-/// Print guidance for planning an existing project (sub-agent mode for initiatives)
-fn print_existing_project_guidance(project: &Project, tasks: &[Task]) {
-    println!("# Project: {}", project.name);
-    println!();
-    println!("ID: {}", project.id);
+/// Format guidance for planning an existing project (sub-agent mode for initiatives)
+fn format_existing_project_guidance(project: &Project, tasks: &[Task]) -> String {
+    let mut output = String::new();
+
+    output.push_str(&format!("# Project: {}\n\n", project.name));
+    output.push_str(&format!("ID: {}\n", project.id));
 
     // Show description if present
     if let Some(ref desc) = project.description {
-        println!();
-        println!("## Description");
-        println!();
-        println!("{}", desc);
+        output.push_str("\n## Description\n\n");
+        output.push_str(desc);
+        output.push('\n');
     }
 
     // Show existing tasks if any (don't mention if none)
     if !tasks.is_empty() {
-        println!();
-        println!("## Existing Tasks");
-        println!();
+        output.push_str("\n## Existing Tasks\n\n");
         for task in tasks {
             let status_indicator = match task.status.as_str() {
                 "done" => "[x]",
@@ -170,28 +284,23 @@ fn print_existing_project_guidance(project: &Project, tasks: &[Task]) {
                 "blocked" => "[!]",
                 _ => "[ ]",
             };
-            println!(
-                "- {} {} ({}) - {}",
+            output.push_str(&format!(
+                "- {} {} ({}) - {}\n",
                 status_indicator, task.id, task.priority, task.title
-            );
+            ));
         }
     }
 
-    println!();
-    println!("## Research");
-    println!();
-    println!("Before creating tasks, research the codebase:");
-    println!("- Find all files that need modification (exact paths, line numbers)");
-    println!("- Document existing patterns to follow");
-    println!("- Identify test patterns to replicate");
-    println!();
+    output.push_str("\n## Research\n\n");
+    output.push_str("Before creating tasks, research the codebase:\n");
+    output.push_str("- Find all files that need modification (exact paths, line numbers)\n");
+    output.push_str("- Document existing patterns to follow\n");
+    output.push_str("- Identify test patterns to replicate\n\n");
 
     // Create Tasks section
-    println!("## Create Tasks");
-    println!();
-    println!("Task descriptions are the ONLY context workers receive.");
-    println!();
-    println!(
+    output.push_str("## Create Tasks\n\n");
+    output.push_str("Task descriptions are the ONLY context workers receive.\n\n");
+    output.push_str(&format!(
         r#"  granary project {} tasks create "Task title" --priority P1 --description "
   **Goal:** What this accomplishes
 
@@ -205,25 +314,25 @@ fn print_existing_project_guidance(project: &Project, tasks: &[Task]) {
 
   **Acceptance criteria:**
   - [ ] Criterion 1
-  ""#,
+  "
+"#,
         project.id
-    );
-    println!();
+    ));
 
     // Set Dependencies section
-    println!("## Set Dependencies");
-    println!();
-    println!("  granary task <task-id> deps add <other-task-id>");
-    println!();
+    output.push_str("## Set Dependencies\n\n");
+    output.push_str("  granary task <task-id> deps add <other-task-id>\n\n");
 
     // Attach Steering Files section
-    println!("## Attach Steering Files");
-    println!();
-    println!("  granary steering add <path> --project {}", project.id);
-    println!();
+    output.push_str("## Attach Steering Files\n\n");
+    output.push_str(&format!(
+        "  granary steering add <path> --project {}\n\n",
+        project.id
+    ));
 
     // Finish section
-    println!("## Finish");
-    println!();
-    println!("  granary project {} ready", project.id);
+    output.push_str("## Finish\n\n");
+    output.push_str(&format!("  granary project {} ready", project.id));
+
+    output
 }

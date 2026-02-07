@@ -1,19 +1,141 @@
 //! CLI handlers for initiative commands
 
-use crate::cli::args::{InitiativeAction, InitiativesAction};
+use crate::cli::args::{CliOutputFormat, InitiativeAction, InitiativesAction};
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::db;
 use crate::error::Result;
-use crate::models::{CreateInitiative, UpdateInitiative};
-use crate::output::{Formatter, OutputFormat};
+use crate::models::{CreateInitiative, Initiative, InitiativeSummary, UpdateInitiative};
+use crate::output::{Output, json, prompt, table};
 use crate::services::{self, Workspace};
+use granary_types::{Project, Task};
 use std::time::Duration;
+
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for a list of initiatives
+pub struct InitiativesOutput {
+    pub initiatives: Vec<Initiative>,
+}
+
+impl Output for InitiativesOutput {
+    fn to_json(&self) -> String {
+        json::format_initiatives(&self.initiatives)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_initiatives(&self.initiatives)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_initiatives(&self.initiatives)
+    }
+}
+
+/// Output for a single initiative
+pub struct InitiativeOutput {
+    pub initiative: Initiative,
+}
+
+impl Output for InitiativeOutput {
+    fn to_json(&self) -> String {
+        json::format_initiative(&self.initiative)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_initiative(&self.initiative)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_initiative(&self.initiative)
+    }
+}
+
+/// Output for initiative summary
+pub struct InitiativeSummaryOutput {
+    pub summary: InitiativeSummary,
+}
+
+impl Output for InitiativeSummaryOutput {
+    fn to_json(&self) -> String {
+        json::format_initiative_summary(&self.summary)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_initiative_summary(&self.summary)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_initiative_summary(&self.summary)
+    }
+}
+
+/// Output for projects in an initiative (reuses projects output)
+pub struct InitiativeProjectsOutput {
+    pub projects: Vec<Project>,
+}
+
+impl Output for InitiativeProjectsOutput {
+    fn to_json(&self) -> String {
+        json::format_projects(&self.projects)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_projects(&self.projects)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_projects(&self.projects)
+    }
+}
+
+/// Output for tasks with dependencies
+pub struct InitiativeTasksOutput {
+    pub tasks: Vec<(Task, Vec<String>)>,
+}
+
+impl Output for InitiativeTasksOutput {
+    fn to_json(&self) -> String {
+        json::format_tasks_with_deps(&self.tasks)
+    }
+
+    fn to_prompt(&self) -> String {
+        let refs: Vec<(&Task, &[String])> =
+            self.tasks.iter().map(|(t, d)| (t, d.as_slice())).collect();
+        prompt::format_tasks_with_deps(&refs)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_tasks_with_deps(&self.tasks)
+    }
+}
+
+/// Output for a single task with dependencies
+pub struct InitiativeTaskOutput {
+    pub task: Task,
+    pub blocked_by: Vec<String>,
+}
+
+impl Output for InitiativeTaskOutput {
+    fn to_json(&self) -> String {
+        json::format_task_with_deps(&self.task, self.blocked_by.clone())
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_task_with_deps(&self.task, &self.blocked_by)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_task_with_deps(&self.task, &self.blocked_by)
+    }
+}
 
 /// Handle initiatives command (list or create)
 pub async fn initiatives(
     action: Option<InitiativesAction>,
     include_archived: bool,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
     watch: bool,
     interval: u64,
 ) -> Result<()> {
@@ -23,7 +145,7 @@ pub async fn initiatives(
             if watch {
                 let interval_duration = Duration::from_secs(interval);
                 watch_loop(interval_duration, || async {
-                    let output = fetch_and_format_initiatives(include_archived, format).await?;
+                    let output = fetch_and_format_initiatives(include_archived, cli_format).await?;
                     Ok(format!(
                         "{}\n{}",
                         watch_status_line(interval_duration),
@@ -32,7 +154,7 @@ pub async fn initiatives(
                 })
                 .await
             } else {
-                let output = fetch_and_format_initiatives(include_archived, format).await?;
+                let output = fetch_and_format_initiatives(include_archived, cli_format).await?;
                 println!("{}", output);
                 Ok(())
             }
@@ -42,26 +164,29 @@ pub async fn initiatives(
             description,
             owner,
             tags,
-        }) => create_initiative(&name, description, owner, tags, format).await,
+        }) => create_initiative(&name, description, owner, tags, cli_format).await,
     }
 }
 
 /// Fetch and format all initiatives as a string
 async fn fetch_and_format_initiatives(
     include_archived: bool,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<String> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
     let initiatives = services::list_initiatives(&pool, include_archived).await?;
-    let formatter = Formatter::new(format);
-    Ok(formatter.format_initiatives(&initiatives))
+    let output = InitiativesOutput { initiatives };
+    Ok(output.format(cli_format))
 }
 
 /// List all initiatives
-pub async fn list_initiatives(include_archived: bool, format: OutputFormat) -> Result<()> {
-    let output = fetch_and_format_initiatives(include_archived, format).await?;
+pub async fn list_initiatives(
+    include_archived: bool,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
+    let output = fetch_and_format_initiatives(include_archived, cli_format).await?;
     println!("{}", output);
     Ok(())
 }
@@ -72,7 +197,7 @@ pub async fn create_initiative(
     description: Option<String>,
     owner: Option<String>,
     tags: Option<String>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
@@ -92,8 +217,8 @@ pub async fn create_initiative(
     )
     .await?;
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_initiative(&initiative));
+    let output = InitiativeOutput { initiative };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }
@@ -102,18 +227,17 @@ pub async fn create_initiative(
 pub async fn initiative(
     id: &str,
     action: Option<InitiativeAction>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
-
-    let formatter = Formatter::new(format);
 
     match action {
         None => {
             // Show initiative details
             let initiative = services::get_initiative_or_error(&pool, id).await?;
-            println!("{}", formatter.format_initiative(&initiative));
+            let output = InitiativeOutput { initiative };
+            println!("{}", output.format(cli_format));
         }
 
         Some(InitiativeAction::Update {
@@ -137,7 +261,8 @@ pub async fn initiative(
             )
             .await?;
 
-            println!("{}", formatter.format_initiative(&initiative));
+            let output = InitiativeOutput { initiative };
+            println!("{}", output.format(cli_format));
         }
 
         Some(InitiativeAction::Archive) => {
@@ -151,7 +276,8 @@ pub async fn initiative(
             if projects.is_empty() {
                 println!("No projects in initiative {}", id);
             } else {
-                println!("{}", formatter.format_projects(&projects));
+                let output = InitiativeProjectsOutput { projects };
+                println!("{}", output.format(cli_format));
             }
         }
 
@@ -184,17 +310,22 @@ pub async fn initiative(
                 println!("No actionable tasks in initiative {}", id);
             } else if all {
                 let tasks_with_deps = services::get_tasks_with_deps(&pool, tasks).await?;
-                println!("{}", formatter.format_tasks_with_deps(&tasks_with_deps));
+                let output = InitiativeTasksOutput {
+                    tasks: tasks_with_deps,
+                };
+                println!("{}", output.format(cli_format));
             } else {
                 let (task, blocked_by) = services::get_task_with_deps(&pool, &tasks[0].id).await?;
-                println!("{}", formatter.format_task_with_deps(&task, blocked_by));
+                let output = InitiativeTaskOutput { task, blocked_by };
+                println!("{}", output.format(cli_format));
             }
         }
 
         Some(InitiativeAction::Summary) => {
             // Generate and display initiative summary
             let summary = services::generate_initiative_summary(&pool, id, 5).await?;
-            println!("{}", formatter.format_initiative_summary(&summary));
+            let output = InitiativeSummaryOutput { summary };
+            println!("{}", output.format(cli_format));
         }
     }
 

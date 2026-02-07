@@ -5,14 +5,69 @@
 
 use std::time::Duration;
 
-use crate::cli::args::RunCommand;
+use crate::cli::args::{CliOutputFormat, RunCommand};
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::daemon::{LogTarget, ensure_daemon};
 use crate::db;
 use crate::error::{GranaryError, Result};
-use crate::models::run::{RunStatus, UpdateRunStatus};
-use crate::output::{Formatter, OutputFormat};
+use crate::models::run::{Run, RunStatus, UpdateRunStatus};
+use crate::output::{Output, json, table};
 use crate::services::global_config_service;
+
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for a list of runs
+pub struct RunsOutput {
+    pub runs: Vec<Run>,
+    pub show_all_hint: bool,
+}
+
+impl Output for RunsOutput {
+    fn to_json(&self) -> String {
+        json::format_runs(&self.runs)
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.runs.is_empty() {
+            return "No runs found.".to_string();
+        }
+        // Runs don't have a prompt formatter, use table format
+        table::format_runs(&self.runs)
+    }
+
+    fn to_text(&self) -> String {
+        if self.runs.is_empty() {
+            let mut msg = "No active runs found.".to_string();
+            if self.show_all_hint {
+                msg.push_str("\nUse --all to include completed/failed/cancelled runs.");
+            }
+            return msg;
+        }
+        table::format_runs(&self.runs)
+    }
+}
+
+/// Output for a single run
+pub struct RunOutput {
+    pub run: Run,
+}
+
+impl Output for RunOutput {
+    fn to_json(&self) -> String {
+        json::format_run(&self.run)
+    }
+
+    fn to_prompt(&self) -> String {
+        // Runs don't have a prompt formatter, use table format
+        table::format_run(&self.run)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_run(&self.run)
+    }
+}
 
 /// List all runs with optional filters
 pub async fn list_runs(
@@ -20,7 +75,7 @@ pub async fn list_runs(
     status: Option<String>,
     all: bool,
     limit: u32,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
     watch: bool,
     interval: u64,
 ) -> Result<()> {
@@ -35,7 +90,7 @@ pub async fn list_runs(
                     status.as_deref(),
                     all,
                     limit,
-                    format,
+                    cli_format,
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -48,9 +103,14 @@ pub async fn list_runs(
         })
         .await?;
     } else {
-        let output =
-            fetch_and_format_runs(worker_id.as_deref(), status.as_deref(), all, limit, format)
-                .await?;
+        let output = fetch_and_format_runs(
+            worker_id.as_deref(),
+            status.as_deref(),
+            all,
+            limit,
+            cli_format,
+        )
+        .await?;
         print!("{}", output);
     }
     Ok(())
@@ -62,7 +122,7 @@ async fn fetch_and_format_runs(
     status: Option<&str>,
     all: bool,
     limit: u32,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<String> {
     let global_pool = global_config_service::global_pool().await?;
 
@@ -106,46 +166,38 @@ async fn fetch_and_format_runs(
     // Sort by created_at descending (most recent first)
     runs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-    if runs.is_empty() {
-        if all {
-            return Ok("No runs found.\n".to_string());
-        } else {
-            return Ok(
-                "No active runs found.\nUse --all to include completed/failed/cancelled runs.\n"
-                    .to_string(),
-            );
-        }
-    }
-
-    let formatter = Formatter::new(format);
-    Ok(format!("{}\n", formatter.format_runs(&runs)))
+    let output = RunsOutput {
+        runs,
+        show_all_hint: !all,
+    };
+    Ok(format!("{}\n", output.format(cli_format)))
 }
 
 /// Handle run subcommands
-pub async fn run(command: RunCommand, format: OutputFormat) -> Result<()> {
+pub async fn run(command: RunCommand, cli_format: Option<CliOutputFormat>) -> Result<()> {
     match command {
-        RunCommand::Status { run_id } => show_status(&run_id, format).await,
+        RunCommand::Status { run_id } => show_status(&run_id, cli_format).await,
         RunCommand::Logs {
             run_id,
             follow,
             lines,
         } => show_logs(&run_id, follow, lines).await,
-        RunCommand::Stop { run_id } => stop_run(&run_id, format).await,
-        RunCommand::Pause { run_id } => pause_run(&run_id, format).await,
-        RunCommand::Resume { run_id } => resume_run(&run_id, format).await,
+        RunCommand::Stop { run_id } => stop_run(&run_id, cli_format).await,
+        RunCommand::Pause { run_id } => pause_run(&run_id, cli_format).await,
+        RunCommand::Resume { run_id } => resume_run(&run_id, cli_format).await,
     }
 }
 
 /// Show run status and details
-async fn show_status(run_id: &str, format: OutputFormat) -> Result<()> {
+async fn show_status(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result<()> {
     let global_pool = global_config_service::global_pool().await?;
 
     let run = db::runs::get(&global_pool, run_id)
         .await?
         .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_run(&run));
+    let output = RunOutput { run: run.clone() };
+    println!("{}", output.format(cli_format));
 
     // Check if process is actually running (if run says it's running)
     if run.status_enum() == RunStatus::Running
@@ -262,7 +314,7 @@ async fn show_logs(run_id: &str, follow: bool, lines: usize) -> Result<()> {
 }
 
 /// Stop a running run
-async fn stop_run(run_id: &str, format: OutputFormat) -> Result<()> {
+async fn stop_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result<()> {
     let global_pool = global_config_service::global_pool().await?;
 
     let run = db::runs::get(&global_pool, run_id)
@@ -307,15 +359,15 @@ async fn stop_run(run_id: &str, format: OutputFormat) -> Result<()> {
     let run = db::runs::get(&global_pool, run_id)
         .await?
         .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
-    let formatter = Formatter::new(format);
+    let output = RunOutput { run };
     println!("Run stopped.");
-    println!("{}", formatter.format_run(&run));
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }
 
 /// Pause a running run (sends SIGSTOP)
-async fn pause_run(run_id: &str, format: OutputFormat) -> Result<()> {
+async fn pause_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result<()> {
     let global_pool = global_config_service::global_pool().await?;
 
     let run = db::runs::get(&global_pool, run_id)
@@ -359,15 +411,15 @@ async fn pause_run(run_id: &str, format: OutputFormat) -> Result<()> {
     let run = db::runs::get(&global_pool, run_id)
         .await?
         .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
-    let formatter = Formatter::new(format);
+    let output = RunOutput { run };
     println!("Run paused.");
-    println!("{}", formatter.format_run(&run));
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }
 
 /// Resume a paused run (sends SIGCONT)
-async fn resume_run(run_id: &str, format: OutputFormat) -> Result<()> {
+async fn resume_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result<()> {
     let global_pool = global_config_service::global_pool().await?;
 
     let run = db::runs::get(&global_pool, run_id)
@@ -411,9 +463,9 @@ async fn resume_run(run_id: &str, format: OutputFormat) -> Result<()> {
     let run = db::runs::get(&global_pool, run_id)
         .await?
         .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
-    let formatter = Formatter::new(format);
+    let output = RunOutput { run };
     println!("Run resumed.");
-    println!("{}", formatter.format_run(&run));
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }

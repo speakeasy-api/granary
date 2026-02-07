@@ -1,711 +1,716 @@
 pub mod json;
 pub mod prompt;
 pub mod table;
+pub mod types;
 
-use granary_types::{Initiative, InitiativeSummary, Project, Task};
+use crate::cli::args::CliOutputFormat;
+pub use types::OutputType;
 
-use crate::models::run::Run;
-use crate::models::*;
-use granary_types::worker;
+/// Trait for command outputs that can be formatted in multiple ways
+pub trait Output: Sized {
+    /// The preferred output type for this output (can be overridden by --format)
+    fn output_type() -> OutputType {
+        OutputType::Text
+    }
 
-/// Output format enum
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum OutputFormat {
-    #[default]
-    Table,
-    Json,
-    Yaml,
-    Md,
-    Prompt,
-}
+    /// Format as JSON
+    fn to_json(&self) -> String;
 
-impl std::str::FromStr for OutputFormat {
-    type Err = ();
+    /// Format as prompt (LLM-optimized)
+    fn to_prompt(&self) -> String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "table" => Ok(OutputFormat::Table),
-            "json" => Ok(OutputFormat::Json),
-            "yaml" => Ok(OutputFormat::Yaml),
-            "md" | "markdown" => Ok(OutputFormat::Md),
-            "prompt" => Ok(OutputFormat::Prompt),
-            _ => Err(()),
+    /// Format as text (human-readable table/text)
+    fn to_text(&self) -> String;
+
+    /// Format according to the given output format, falling back to preferred type
+    fn format(&self, format: Option<CliOutputFormat>) -> String {
+        match format.unwrap_or_else(|| Self::output_type().into()) {
+            CliOutputFormat::Json => self.to_json(),
+            CliOutputFormat::Prompt => self.to_prompt(),
+            _ => self.to_text(),
         }
     }
 }
 
-/// Format output based on the selected format
-pub struct Formatter {
-    pub format: OutputFormat,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::args::CliOutputFormat;
+    use crate::models::run::Run;
+    use crate::models::*;
 
-impl Formatter {
-    pub fn new(format: OutputFormat) -> Self {
-        Self { format }
-    }
+    // =========================================================================
+    // Test helpers - construct minimal valid instances
+    // =========================================================================
 
-    pub fn format_project(&self, project: &Project) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_project(project),
-            OutputFormat::Yaml => yaml_format_project(project),
-            OutputFormat::Md => md_format_project(project),
-            OutputFormat::Prompt => prompt::format_project(project),
-            OutputFormat::Table => table::format_project(project),
+    fn make_task(id: &str, title: &str) -> Task {
+        Task {
+            id: id.to_string(),
+            project_id: "proj-test".to_string(),
+            task_number: 1,
+            parent_task_id: None,
+            title: title.to_string(),
+            description: None,
+            status: "todo".to_string(),
+            priority: "P2".to_string(),
+            owner: None,
+            tags: None,
+            blocked_reason: None,
+            started_at: None,
+            completed_at: None,
+            due_at: None,
+            claim_owner: None,
+            claim_claimed_at: None,
+            claim_lease_expires_at: None,
+            pinned: 0,
+            focus_weight: 0,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            version: 1,
         }
     }
 
-    pub fn format_projects(&self, projects: &[Project]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_projects(projects),
-            OutputFormat::Yaml => yaml_format_projects(projects),
-            OutputFormat::Md => md_format_projects(projects),
-            OutputFormat::Prompt => prompt::format_projects(projects),
-            OutputFormat::Table => table::format_projects(projects),
+    fn make_project(id: &str, name: &str) -> Project {
+        Project {
+            id: id.to_string(),
+            slug: id.to_string(),
+            name: name.to_string(),
+            description: None,
+            owner: None,
+            status: "active".to_string(),
+            tags: None,
+            default_session_policy: None,
+            steering_refs: None,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            version: 1,
         }
     }
 
-    pub fn format_task(&self, task: &Task) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_task(task),
-            OutputFormat::Yaml => yaml_format_task(task),
-            OutputFormat::Md => md_format_task(task),
-            OutputFormat::Prompt => prompt::format_task(task),
-            OutputFormat::Table => table::format_task(task),
+    fn make_run(id: &str) -> Run {
+        Run {
+            id: id.to_string(),
+            worker_id: "worker-1".to_string(),
+            event_id: 1,
+            event_type: "task.created".to_string(),
+            entity_id: "task-1".to_string(),
+            command: "test".to_string(),
+            args: "".to_string(),
+            status: "running".to_string(),
+            exit_code: None,
+            error_message: None,
+            attempt: 1,
+            max_attempts: 3,
+            next_retry_at: None,
+            pid: None,
+            log_path: None,
+            started_at: Some("2025-01-01T00:00:00Z".to_string()),
+            completed_at: None,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
         }
     }
 
-    pub fn format_task_with_deps(&self, task: &Task, blocked_by: Vec<String>) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_task_with_deps(task, blocked_by),
-            OutputFormat::Yaml => yaml_format_task_with_deps(task, &blocked_by),
-            OutputFormat::Md => md_format_task_with_deps(task, &blocked_by),
-            OutputFormat::Prompt => prompt::format_task_with_deps(task, &blocked_by),
-            OutputFormat::Table => table::format_task_with_deps(task, &blocked_by),
+    fn make_comment(id: &str) -> Comment {
+        Comment {
+            id: id.to_string(),
+            parent_type: "task".to_string(),
+            parent_id: "task-1".to_string(),
+            comment_number: 1,
+            kind: "note".to_string(),
+            content: "Test comment".to_string(),
+            author: Some("tester".to_string()),
+            meta: None,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            version: 1,
         }
     }
 
-    pub fn format_tasks(&self, tasks: &[Task]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_tasks(tasks),
-            OutputFormat::Yaml => yaml_format_tasks(tasks),
-            OutputFormat::Md => md_format_tasks(tasks),
-            OutputFormat::Prompt => prompt::format_tasks(tasks),
-            OutputFormat::Table => table::format_tasks(tasks),
+    fn make_session(id: &str) -> Session {
+        Session {
+            id: id.to_string(),
+            name: Some("test-session".to_string()),
+            owner: None,
+            mode: None,
+            focus_task_id: None,
+            variables: None,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            closed_at: None,
         }
     }
 
-    pub fn format_tasks_with_deps(&self, tasks_with_deps: &[(Task, Vec<String>)]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_tasks_with_deps(tasks_with_deps),
-            OutputFormat::Yaml => yaml_format_tasks_with_deps(tasks_with_deps),
-            OutputFormat::Md => md_format_tasks_with_deps(tasks_with_deps),
-            OutputFormat::Prompt => {
-                let refs: Vec<(&Task, &[String])> = tasks_with_deps
-                    .iter()
-                    .map(|(t, d)| (t, d.as_slice()))
-                    .collect();
-                prompt::format_tasks_with_deps(&refs)
-            }
-            OutputFormat::Table => table::format_tasks_with_deps(tasks_with_deps),
+    fn make_checkpoint(id: &str) -> Checkpoint {
+        Checkpoint {
+            id: id.to_string(),
+            session_id: "sess-1".to_string(),
+            name: "checkpoint-1".to_string(),
+            snapshot: "{}".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
         }
     }
 
-    pub fn format_comment(&self, comment: &Comment) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_comment(comment),
-            OutputFormat::Yaml => yaml_format_comment(comment),
-            OutputFormat::Md => md_format_comment(comment),
-            OutputFormat::Prompt => prompt::format_comment(comment),
-            OutputFormat::Table => table::format_comment(comment),
+    fn make_artifact(id: &str) -> Artifact {
+        Artifact {
+            id: id.to_string(),
+            parent_type: "task".to_string(),
+            parent_id: "task-1".to_string(),
+            artifact_number: 1,
+            artifact_type: "file".to_string(),
+            path_or_url: "/tmp/test.txt".to_string(),
+            description: Some("Test artifact".to_string()),
+            meta: None,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
         }
     }
 
-    pub fn format_comments(&self, comments: &[Comment]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_comments(comments),
-            OutputFormat::Yaml => yaml_format_comments(comments),
-            OutputFormat::Md => md_format_comments(comments),
-            OutputFormat::Prompt => prompt::format_comments(comments),
-            OutputFormat::Table => table::format_comments(comments),
-        }
-    }
+    // =========================================================================
+    // Output trait default type tests
+    // =========================================================================
 
-    pub fn format_session(&self, session: &Session) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_session(session),
-            OutputFormat::Yaml => yaml_format_session(session),
-            OutputFormat::Md => md_format_session(session),
-            OutputFormat::Prompt => prompt::format_session(session),
-            OutputFormat::Table => table::format_session(session),
-        }
-    }
-
-    pub fn format_sessions(&self, sessions: &[Session]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_sessions(sessions),
-            OutputFormat::Yaml => yaml_format_sessions(sessions),
-            OutputFormat::Md => md_format_sessions(sessions),
-            OutputFormat::Prompt => prompt::format_sessions(sessions),
-            OutputFormat::Table => table::format_sessions(sessions),
-        }
-    }
-
-    pub fn format_checkpoint(&self, checkpoint: &Checkpoint) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_checkpoint(checkpoint),
-            OutputFormat::Yaml => yaml_format_checkpoint(checkpoint),
-            OutputFormat::Md => md_format_checkpoint(checkpoint),
-            OutputFormat::Prompt => prompt::format_checkpoint(checkpoint),
-            OutputFormat::Table => table::format_checkpoint(checkpoint),
-        }
-    }
-
-    pub fn format_checkpoints(&self, checkpoints: &[Checkpoint]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_checkpoints(checkpoints),
-            OutputFormat::Yaml => yaml_format_checkpoints(checkpoints),
-            OutputFormat::Md => md_format_checkpoints(checkpoints),
-            OutputFormat::Prompt => prompt::format_checkpoints(checkpoints),
-            OutputFormat::Table => table::format_checkpoints(checkpoints),
-        }
-    }
-
-    pub fn format_artifact(&self, artifact: &Artifact) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_artifact(artifact),
-            OutputFormat::Yaml => yaml_format_artifact(artifact),
-            _ => table::format_artifact(artifact),
-        }
-    }
-
-    pub fn format_artifacts(&self, artifacts: &[Artifact]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_artifacts(artifacts),
-            OutputFormat::Yaml => yaml_format_artifacts(artifacts),
-            _ => table::format_artifacts(artifacts),
-        }
-    }
-
-    pub fn format_next_task(&self, task: Option<&Task>, reason: Option<&str>) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_next_task(task, reason),
-            OutputFormat::Prompt => prompt::format_next_task(task, reason),
-            _ => table::format_next_task(task, reason),
-        }
-    }
-
-    pub fn format_search_results(&self, results: &[SearchResult]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_search_results(results),
-            OutputFormat::Yaml => yaml_format_search_results(results),
-            OutputFormat::Md => md_format_search_results(results),
-            OutputFormat::Prompt => prompt::format_search_results(results),
-            OutputFormat::Table => table::format_search_results(results),
-        }
-    }
-
-    pub fn format_initiative(&self, initiative: &Initiative) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_initiative(initiative),
-            OutputFormat::Yaml => yaml_format_initiative(initiative),
-            OutputFormat::Md => md_format_initiative(initiative),
-            OutputFormat::Prompt => prompt::format_initiative(initiative),
-            OutputFormat::Table => table::format_initiative(initiative),
-        }
-    }
-
-    pub fn format_initiatives(&self, initiatives: &[Initiative]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_initiatives(initiatives),
-            OutputFormat::Yaml => yaml_format_initiatives(initiatives),
-            OutputFormat::Md => md_format_initiatives(initiatives),
-            OutputFormat::Prompt => prompt::format_initiatives(initiatives),
-            OutputFormat::Table => table::format_initiatives(initiatives),
-        }
-    }
-
-    pub fn format_initiative_summary(&self, summary: &InitiativeSummary) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_initiative_summary(summary),
-            OutputFormat::Yaml => yaml_format_initiative_summary(summary),
-            OutputFormat::Md => md_format_initiative_summary(summary),
-            OutputFormat::Prompt => prompt::format_initiative_summary(summary),
-            OutputFormat::Table => table::format_initiative_summary(summary),
-        }
-    }
-
-    pub fn format_worker(&self, worker: &worker::Worker) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_worker(worker),
-            OutputFormat::Yaml => yaml_format_worker(worker),
-            _ => table::format_worker(worker),
-        }
-    }
-
-    pub fn format_workers(&self, workers: &[worker::Worker]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_workers(workers),
-            OutputFormat::Yaml => yaml_format_workers(workers),
-            _ => table::format_workers(workers),
-        }
-    }
-
-    pub fn format_run(&self, run: &Run) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_run(run),
-            OutputFormat::Yaml => yaml_format_run(run),
-            _ => table::format_run(run),
-        }
-    }
-
-    pub fn format_runs(&self, runs: &[Run]) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_runs(runs),
-            OutputFormat::Yaml => yaml_format_runs(runs),
-            _ => table::format_runs(runs),
-        }
-    }
-
-    /// Format task creation confirmation
-    /// For table/text formats: single line "Task created: <task-id>"
-    /// For JSON: full task object for scripting compatibility
-    pub fn format_task_created(&self, task: &Task) -> String {
-        match self.format {
-            OutputFormat::Json => json::format_task(task),
-            OutputFormat::Yaml => yaml_format_task(task),
-            _ => format!("Task created: {}", task.id),
-        }
-    }
-}
-
-// YAML formatters (using serde_yaml)
-fn yaml_format_project(project: &Project) -> String {
-    serde_yaml::to_string(project).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_projects(projects: &[Project]) -> String {
-    serde_yaml::to_string(projects).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_task(task: &Task) -> String {
-    let output = json::TaskOutput::from_task(task.clone());
-    serde_yaml::to_string(&output).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_task_with_deps(task: &Task, blocked_by: &[String]) -> String {
-    let output = json::TaskOutput::new(task.clone(), blocked_by.to_vec());
-    serde_yaml::to_string(&output).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_tasks(tasks: &[Task]) -> String {
-    let outputs: Vec<json::TaskOutput> = tasks
-        .iter()
-        .map(|t| json::TaskOutput::from_task(t.clone()))
-        .collect();
-    serde_yaml::to_string(&outputs).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_tasks_with_deps(tasks_with_deps: &[(Task, Vec<String>)]) -> String {
-    let outputs: Vec<json::TaskOutput> = tasks_with_deps
-        .iter()
-        .map(|(t, deps)| json::TaskOutput::new(t.clone(), deps.clone()))
-        .collect();
-    serde_yaml::to_string(&outputs).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_comment(comment: &Comment) -> String {
-    serde_yaml::to_string(comment).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_comments(comments: &[Comment]) -> String {
-    serde_yaml::to_string(comments).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_session(session: &Session) -> String {
-    serde_yaml::to_string(session).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_sessions(sessions: &[Session]) -> String {
-    serde_yaml::to_string(sessions).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_checkpoint(checkpoint: &Checkpoint) -> String {
-    serde_yaml::to_string(checkpoint).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_checkpoints(checkpoints: &[Checkpoint]) -> String {
-    serde_yaml::to_string(checkpoints).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_artifact(artifact: &Artifact) -> String {
-    serde_yaml::to_string(artifact).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_artifacts(artifacts: &[Artifact]) -> String {
-    serde_yaml::to_string(artifacts).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-// Markdown formatters
-fn md_format_project(project: &Project) -> String {
-    let mut md = String::new();
-    md.push_str(&format!("# {}\n\n", project.name));
-    md.push_str(&format!("**ID:** `{}`\n", project.id));
-    md.push_str(&format!("**Status:** {}\n", project.status));
-    if let Some(owner) = &project.owner {
-        md.push_str(&format!("**Owner:** {}\n", owner));
-    }
-    if let Some(desc) = &project.description {
-        md.push_str(&format!("\n{}\n", desc));
-    }
-    let tags = project.tags_vec();
-    if !tags.is_empty() {
-        md.push_str(&format!("\n**Tags:** {}\n", tags.join(", ")));
-    }
-    md
-}
-
-fn md_format_projects(projects: &[Project]) -> String {
-    let mut md = String::from("# Projects\n\n");
-    for project in projects {
-        md.push_str(&format!(
-            "- **{}** (`{}`) - {}\n",
-            project.name, project.id, project.status
-        ));
-    }
-    md
-}
-
-fn md_format_task(task: &Task) -> String {
-    md_format_task_with_deps(task, &[])
-}
-
-fn md_format_task_with_deps(task: &Task, blocked_by: &[String]) -> String {
-    let mut md = String::new();
-    let checkbox = if task.status == "done" { "[x]" } else { "[ ]" };
-    md.push_str(&format!("## {} {}\n\n", checkbox, task.title));
-    md.push_str(&format!("**ID:** `{}`\n", task.id));
-    md.push_str(&format!(
-        "**Status:** {} | **Priority:** {}\n",
-        task.status, task.priority
-    ));
-    if let Some(owner) = &task.owner {
-        md.push_str(&format!("**Owner:** {}\n", owner));
-    }
-    if let Some(desc) = &task.description {
-        md.push_str(&format!("\n{}\n", desc));
-    }
-    if let Some(reason) = &task.blocked_reason {
-        md.push_str(&format!("\n**Blocked:** {}\n", reason));
-    }
-    if !blocked_by.is_empty() {
-        md.push_str(&format!("\n**Blocked by:** {}\n", blocked_by.join(", ")));
-    }
-    md
-}
-
-fn md_format_tasks(tasks: &[Task]) -> String {
-    let tasks_with_deps: Vec<(&Task, &[String])> = tasks.iter().map(|t| (t, &[][..])).collect();
-    md_format_tasks_internal(&tasks_with_deps)
-}
-
-fn md_format_tasks_with_deps(tasks_with_deps: &[(Task, Vec<String>)]) -> String {
-    let refs: Vec<(&Task, &[String])> = tasks_with_deps
-        .iter()
-        .map(|(t, d)| (t, d.as_slice()))
-        .collect();
-    md_format_tasks_internal(&refs)
-}
-
-fn md_format_tasks_internal(tasks_with_deps: &[(&Task, &[String])]) -> String {
-    let mut md = String::from("# Tasks\n\n");
-    for (task, blocked_by) in tasks_with_deps {
-        let checkbox = if task.status == "done" { "[x]" } else { "[ ]" };
-        let blocked = if task.blocked_reason.is_some() || !blocked_by.is_empty() {
-            " (blocked)"
-        } else {
-            ""
+    mod default_output_types {
+        use super::*;
+        use crate::cli::checkpoints::{CheckpointOutput, CheckpointsOutput};
+        use crate::cli::comments::{CommentOutput, CommentsOutput};
+        use crate::cli::initiate::InitiateOutput;
+        use crate::cli::initiatives::{
+            InitiativeOutput as InitiativeShowOutput, InitiativeProjectsOutput,
+            InitiativeSummaryOutput, InitiativeTaskOutput, InitiativeTasksOutput,
+            InitiativesOutput,
         };
-        md.push_str(&format!(
-            "- {} **{}** `{}` [{}]{}",
-            checkbox, task.title, task.id, task.priority, blocked
-        ));
-        if let Some(owner) = &task.owner {
-            md.push_str(&format!(" @{}", owner));
+        use crate::cli::plan::{ExistingPlanOutput, PlanOutput};
+        use crate::cli::projects::{ProjectOutput, ProjectTasksOutput, ProjectsOutput};
+        use crate::cli::run::{RunOutput, RunsOutput};
+        use crate::cli::search::SearchOutput;
+        use crate::cli::sessions::{SessionOutput, SessionsOutput};
+        use crate::cli::show::{ArtifactOutput, ArtifactsOutput};
+        use crate::cli::summary::{ContextOutput, HandoffOutput, SummaryOutput};
+        use crate::cli::tasks::{NextTaskOutput, TaskCreatedOutput, TaskOutput, TasksOutput};
+        use crate::cli::work::{WorkBlockOutput, WorkDoneOutput, WorkOutput, WorkReleaseOutput};
+        use crate::cli::workers::{WorkerOutput, WorkersOutput};
+
+        // LLM-first commands → Prompt
+        #[test]
+        fn plan_output_defaults_to_prompt() {
+            assert_eq!(PlanOutput::output_type(), OutputType::Prompt);
         }
-        if !blocked_by.is_empty() {
-            md.push_str(&format!(" blocked_by: {}", blocked_by.join(", ")));
+
+        #[test]
+        fn existing_plan_output_defaults_to_prompt() {
+            assert_eq!(ExistingPlanOutput::output_type(), OutputType::Prompt);
         }
-        md.push('\n');
-    }
-    md
-}
 
-fn md_format_comment(comment: &Comment) -> String {
-    let mut md = String::new();
-    md.push_str(&format!("### {} ({})\n\n", comment.kind, comment.id));
-    if let Some(author) = &comment.author {
-        md.push_str(&format!("**Author:** {} | ", author));
-    }
-    md.push_str(&format!("**Created:** {}\n\n", comment.created_at));
-    md.push_str(&comment.content);
-    md.push('\n');
-    md
-}
+        #[test]
+        fn work_output_defaults_to_prompt() {
+            assert_eq!(WorkOutput::output_type(), OutputType::Prompt);
+        }
 
-fn md_format_comments(comments: &[Comment]) -> String {
-    let mut md = String::from("# Comments\n\n");
-    for comment in comments {
-        let author = comment.author.as_deref().unwrap_or("anonymous");
-        md.push_str(&format!(
-            "- **[{}]** {} - _{}_\n",
-            comment.kind, comment.content, author
-        ));
-    }
-    md
-}
+        #[test]
+        fn context_output_defaults_to_prompt() {
+            assert_eq!(ContextOutput::output_type(), OutputType::Prompt);
+        }
 
-fn md_format_session(session: &Session) -> String {
-    let mut md = String::new();
-    let name = session.name.as_deref().unwrap_or("Unnamed Session");
-    md.push_str(&format!("# Session: {}\n\n", name));
-    md.push_str(&format!("**ID:** `{}`\n", session.id));
-    if let Some(mode) = &session.mode {
-        md.push_str(&format!("**Mode:** {}\n", mode));
-    }
-    if let Some(owner) = &session.owner {
-        md.push_str(&format!("**Owner:** {}\n", owner));
-    }
-    let status = if session.is_closed() {
-        "Closed"
-    } else {
-        "Active"
-    };
-    md.push_str(&format!("**Status:** {}\n", status));
-    if let Some(focus) = &session.focus_task_id {
-        md.push_str(&format!("**Focus Task:** `{}`\n", focus));
-    }
-    md
-}
+        #[test]
+        fn handoff_output_defaults_to_prompt() {
+            assert_eq!(HandoffOutput::output_type(), OutputType::Prompt);
+        }
 
-fn md_format_sessions(sessions: &[Session]) -> String {
-    let mut md = String::from("# Sessions\n\n");
-    for session in sessions {
-        let name = session.name.as_deref().unwrap_or("Unnamed");
-        let status = if session.is_closed() {
-            "closed"
-        } else {
-            "active"
-        };
-        md.push_str(&format!("- **{}** (`{}`) - {}\n", name, session.id, status));
-    }
-    md
-}
+        #[test]
+        fn initiate_output_defaults_to_prompt() {
+            assert_eq!(InitiateOutput::output_type(), OutputType::Prompt);
+        }
 
-fn md_format_checkpoint(checkpoint: &Checkpoint) -> String {
-    format!(
-        "## Checkpoint: {}\n\n**ID:** `{}`\n**Session:** `{}`\n**Created:** {}\n",
-        checkpoint.name, checkpoint.id, checkpoint.session_id, checkpoint.created_at
-    )
-}
+        // Simple status commands → Text
+        #[test]
+        fn work_done_output_defaults_to_text() {
+            assert_eq!(WorkDoneOutput::output_type(), OutputType::Text);
+        }
 
-fn md_format_checkpoints(checkpoints: &[Checkpoint]) -> String {
-    let mut md = String::from("# Checkpoints\n\n");
-    for cp in checkpoints {
-        md.push_str(&format!(
-            "- **{}** (`{}`) - {}\n",
-            cp.name, cp.id, cp.created_at
-        ));
-    }
-    md
-}
+        #[test]
+        fn work_block_output_defaults_to_text() {
+            assert_eq!(WorkBlockOutput::output_type(), OutputType::Text);
+        }
 
-fn yaml_format_search_results(results: &[SearchResult]) -> String {
-    serde_yaml::to_string(results).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
+        #[test]
+        fn work_release_output_defaults_to_text() {
+            assert_eq!(WorkReleaseOutput::output_type(), OutputType::Text);
+        }
 
-fn yaml_format_initiative(initiative: &Initiative) -> String {
-    serde_yaml::to_string(initiative).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
+        // Data listing commands → Text (trait default)
+        #[test]
+        fn tasks_output_defaults_to_text() {
+            assert_eq!(TasksOutput::output_type(), OutputType::Text);
+        }
 
-fn yaml_format_initiatives(initiatives: &[Initiative]) -> String {
-    serde_yaml::to_string(initiatives).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
+        #[test]
+        fn task_output_defaults_to_text() {
+            assert_eq!(TaskOutput::output_type(), OutputType::Text);
+        }
 
-fn md_format_search_results(results: &[SearchResult]) -> String {
-    let mut md = String::from("# Search Results\n\n");
-    for result in results {
-        match result {
-            SearchResult::Initiative {
-                id,
-                name,
-                description,
-                status,
-            } => {
-                md.push_str(&format!("- **[INITIATIVE]** {} (`{}`)", name, id));
-                if let Some(desc) = description {
-                    md.push_str(&format!(" - {}", desc));
-                }
-                md.push_str(&format!(" [{}]\n", status));
-            }
-            SearchResult::Project {
-                id,
-                name,
-                description,
-                status,
-            } => {
-                md.push_str(&format!("- **[PROJECT]** {} (`{}`)", name, id));
-                if let Some(desc) = description {
-                    md.push_str(&format!(" - {}", desc));
-                }
-                md.push_str(&format!(" [{}]\n", status));
-            }
-            SearchResult::Task {
-                id,
-                title,
-                description,
-                status,
-                priority,
-                project_id,
-            } => {
-                md.push_str(&format!("- **[TASK]** {} (`{}`) [{}]", title, id, priority));
-                if let Some(desc) = description {
-                    md.push_str(&format!(" - {}", desc));
-                }
-                md.push_str(&format!(" - {} (project: {})\n", status, project_id));
-            }
+        #[test]
+        fn next_task_output_defaults_to_text() {
+            assert_eq!(NextTaskOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn task_created_output_defaults_to_text() {
+            assert_eq!(TaskCreatedOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn runs_output_defaults_to_text() {
+            assert_eq!(RunsOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn run_output_defaults_to_text() {
+            assert_eq!(RunOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn search_output_defaults_to_text() {
+            assert_eq!(SearchOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn projects_output_defaults_to_text() {
+            assert_eq!(ProjectsOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn project_output_defaults_to_text() {
+            assert_eq!(ProjectOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn project_tasks_output_defaults_to_text() {
+            assert_eq!(ProjectTasksOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn summary_output_defaults_to_text() {
+            assert_eq!(SummaryOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn sessions_output_defaults_to_text() {
+            assert_eq!(SessionsOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn session_output_defaults_to_text() {
+            assert_eq!(SessionOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn checkpoints_output_defaults_to_text() {
+            assert_eq!(CheckpointsOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn checkpoint_output_defaults_to_text() {
+            assert_eq!(CheckpointOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn comments_output_defaults_to_text() {
+            assert_eq!(CommentsOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn comment_output_defaults_to_text() {
+            assert_eq!(CommentOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn artifacts_output_defaults_to_text() {
+            assert_eq!(ArtifactsOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn artifact_output_defaults_to_text() {
+            assert_eq!(ArtifactOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn workers_output_defaults_to_text() {
+            assert_eq!(WorkersOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn worker_output_defaults_to_text() {
+            assert_eq!(WorkerOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn initiatives_output_defaults_to_text() {
+            assert_eq!(InitiativesOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn initiative_output_defaults_to_text() {
+            assert_eq!(InitiativeShowOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn initiative_summary_output_defaults_to_text() {
+            assert_eq!(InitiativeSummaryOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn initiative_projects_output_defaults_to_text() {
+            assert_eq!(InitiativeProjectsOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn initiative_tasks_output_defaults_to_text() {
+            assert_eq!(InitiativeTasksOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn initiative_task_output_defaults_to_text() {
+            assert_eq!(InitiativeTaskOutput::output_type(), OutputType::Text);
         }
     }
-    md
-}
 
-fn md_format_initiative(initiative: &Initiative) -> String {
-    let mut md = String::new();
-    md.push_str(&format!("# {}\n\n", initiative.name));
-    md.push_str(&format!("**ID:** `{}`\n", initiative.id));
-    md.push_str(&format!("**Status:** {}\n", initiative.status));
-    if let Some(owner) = &initiative.owner {
-        md.push_str(&format!("**Owner:** {}\n", owner));
-    }
-    if let Some(desc) = &initiative.description {
-        md.push_str(&format!("\n{}\n", desc));
-    }
-    let tags = initiative.tags_vec();
-    if !tags.is_empty() {
-        md.push_str(&format!("\n**Tags:** {}\n", tags.join(", ")));
-    }
-    md
-}
+    // =========================================================================
+    // JSON validity tests - verify to_json() produces valid JSON
+    // =========================================================================
 
-fn md_format_initiatives(initiatives: &[Initiative]) -> String {
-    let mut md = String::from("# Initiatives\n\n");
-    for initiative in initiatives {
-        md.push_str(&format!(
-            "- **{}** (`{}`) - {}\n",
-            initiative.name, initiative.id, initiative.status
-        ));
-    }
-    md
-}
+    mod json_validity {
+        use super::*;
+        use crate::cli::checkpoints::{CheckpointOutput, CheckpointsOutput};
+        use crate::cli::comments::{CommentOutput, CommentsOutput};
+        use crate::cli::projects::{ProjectOutput, ProjectTasksOutput, ProjectsOutput};
+        use crate::cli::run::{RunOutput, RunsOutput};
+        use crate::cli::search::SearchOutput;
+        use crate::cli::sessions::{SessionOutput, SessionsOutput};
+        use crate::cli::show::{ArtifactOutput, ArtifactsOutput};
+        use crate::cli::tasks::{NextTaskOutput, TaskCreatedOutput, TaskOutput, TasksOutput};
+        use crate::cli::work::{WorkBlockOutput, WorkDoneOutput, WorkReleaseOutput};
 
-fn yaml_format_initiative_summary(summary: &InitiativeSummary) -> String {
-    serde_yaml::to_string(summary).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
+        #[test]
+        fn tasks_output_json_empty() {
+            let output = TasksOutput { tasks: vec![] };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+            assert_eq!(parsed.as_array().unwrap().len(), 0);
+        }
 
-fn md_format_initiative_summary(summary: &InitiativeSummary) -> String {
-    let mut md = String::new();
-
-    // Header
-    md.push_str(&format!(
-        "# Initiative Summary: {}\n\n",
-        summary.initiative.name
-    ));
-    md.push_str(&format!("**ID:** `{}`\n", summary.initiative.id));
-    if let Some(desc) = &summary.initiative.description {
-        md.push_str(&format!("**Description:** {}\n", desc));
-    }
-    md.push('\n');
-
-    // Progress
-    md.push_str(&format!(
-        "## Progress: {:.1}%\n\n",
-        summary.status.percent_complete
-    ));
-    md.push_str(&format!(
-        "- **Projects:** {} total, {} complete, {} blocked\n",
-        summary.status.total_projects,
-        summary.status.completed_projects,
-        summary.status.blocked_projects
-    ));
-    md.push_str(&format!(
-        "- **Tasks:** {}/{} complete ({} in progress, {} todo, {} blocked)\n\n",
-        summary.status.tasks_done,
-        summary.status.total_tasks,
-        summary.status.tasks_in_progress,
-        summary.status.tasks_todo,
-        summary.status.tasks_blocked
-    ));
-
-    // Projects breakdown
-    if !summary.projects.is_empty() {
-        md.push_str("## Projects\n\n");
-        for proj in &summary.projects {
-            let status = if proj.done_count == proj.task_count && proj.task_count > 0 {
-                "[x]"
-            } else if proj.blocked {
-                "[ ] (blocked)"
-            } else {
-                "[ ]"
+        #[test]
+        fn tasks_output_json_with_data() {
+            let task = make_task("task-1", "Test task");
+            let output = TasksOutput {
+                tasks: vec![(task, vec!["task-0".to_string()])],
             };
-            md.push_str(&format!(
-                "- {} **{}** ({}/{} tasks)\n",
-                status, proj.name, proj.done_count, proj.task_count
-            ));
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+            assert_eq!(parsed.as_array().unwrap().len(), 1);
         }
-        md.push('\n');
+
+        #[test]
+        fn next_task_output_json_none() {
+            let output = NextTaskOutput {
+                task: None,
+                reason: None,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_object());
+        }
+
+        #[test]
+        fn next_task_output_json_some() {
+            let output = NextTaskOutput {
+                task: Some(make_task("task-1", "Test")),
+                reason: Some("priority".to_string()),
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_object());
+            assert!(parsed.get("task").is_some());
+        }
+
+        #[test]
+        fn task_output_json_valid() {
+            let output = TaskOutput {
+                task: make_task("task-1", "Test"),
+                blocked_by: vec![],
+            };
+            let json = output.to_json();
+            let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+        }
+
+        #[test]
+        fn task_created_output_json_valid() {
+            let output = TaskCreatedOutput {
+                task: make_task("task-1", "Created task"),
+            };
+            let json = output.to_json();
+            let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+        }
+
+        #[test]
+        fn runs_output_json_empty() {
+            let output = RunsOutput {
+                runs: vec![],
+                show_all_hint: true,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+            assert_eq!(parsed.as_array().unwrap().len(), 0);
+        }
+
+        #[test]
+        fn runs_output_json_with_data() {
+            let output = RunsOutput {
+                runs: vec![make_run("run-1")],
+                show_all_hint: false,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+            assert_eq!(parsed.as_array().unwrap().len(), 1);
+        }
+
+        #[test]
+        fn run_output_json_valid() {
+            let output = RunOutput {
+                run: make_run("run-1"),
+            };
+            let json = output.to_json();
+            let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+        }
+
+        #[test]
+        fn search_output_json_empty() {
+            let output = SearchOutput { results: vec![] };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+        }
+
+        #[test]
+        fn projects_output_json_empty() {
+            let output = ProjectsOutput { projects: vec![] };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+        }
+
+        #[test]
+        fn project_output_json_valid() {
+            let output = ProjectOutput {
+                project: make_project("proj-1", "Test Project"),
+            };
+            let json = output.to_json();
+            let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+        }
+
+        #[test]
+        fn project_tasks_output_json_empty() {
+            let output = ProjectTasksOutput { tasks: vec![] };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+        }
+
+        #[test]
+        fn sessions_output_json_empty() {
+            let output = SessionsOutput { sessions: vec![] };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+        }
+
+        #[test]
+        fn session_output_json_valid() {
+            let output = SessionOutput {
+                session: make_session("sess-1"),
+            };
+            let json = output.to_json();
+            let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+        }
+
+        #[test]
+        fn checkpoints_output_json_empty() {
+            let output = CheckpointsOutput {
+                checkpoints: vec![],
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+        }
+
+        #[test]
+        fn checkpoint_output_json_valid() {
+            let output = CheckpointOutput {
+                checkpoint: make_checkpoint("cp-1"),
+            };
+            let json = output.to_json();
+            let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+        }
+
+        #[test]
+        fn comments_output_json_empty() {
+            let output = CommentsOutput { comments: vec![] };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+        }
+
+        #[test]
+        fn comment_output_json_valid() {
+            let output = CommentOutput {
+                comment: make_comment("cmt-1"),
+            };
+            let json = output.to_json();
+            let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+        }
+
+        #[test]
+        fn artifacts_output_json_empty() {
+            let output = ArtifactsOutput { artifacts: vec![] };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+        }
+
+        #[test]
+        fn artifact_output_json_valid() {
+            let output = ArtifactOutput {
+                artifact: make_artifact("art-1"),
+            };
+            let json = output.to_json();
+            let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+        }
+
+        #[test]
+        fn work_done_output_json_valid() {
+            let output = WorkDoneOutput;
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["status"], "done");
+        }
+
+        #[test]
+        fn work_block_output_json_valid() {
+            let output = WorkBlockOutput;
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["status"], "blocked");
+        }
+
+        #[test]
+        fn work_release_output_json_valid() {
+            let output = WorkReleaseOutput;
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["status"], "released");
+        }
     }
 
-    // Blockers
-    if !summary.blockers.is_empty() {
-        md.push_str("## Blockers\n\n");
-        for b in &summary.blockers {
-            md.push_str(&format!(
-                "- **[{}]** {}: {}\n",
-                b.blocker_type, b.project_name, b.description
-            ));
+    // =========================================================================
+    // Format dispatch tests - verify format() routes correctly
+    // =========================================================================
+
+    mod format_dispatch {
+        use super::*;
+        use crate::cli::tasks::TasksOutput;
+        use crate::cli::work::WorkDoneOutput;
+
+        #[test]
+        fn format_none_uses_default_output_type() {
+            let output = TasksOutput { tasks: vec![] };
+            // TasksOutput defaults to Text, so format(None) should use to_text()
+            let via_format = output.format(None);
+            let via_text = output.to_text();
+            assert_eq!(via_format, via_text);
         }
-        md.push('\n');
+
+        #[test]
+        fn format_json_override() {
+            let output = TasksOutput { tasks: vec![] };
+            let via_format = output.format(Some(CliOutputFormat::Json));
+            let via_json = output.to_json();
+            assert_eq!(via_format, via_json);
+        }
+
+        #[test]
+        fn format_prompt_override() {
+            let output = TasksOutput { tasks: vec![] };
+            let via_format = output.format(Some(CliOutputFormat::Prompt));
+            let via_prompt = output.to_prompt();
+            assert_eq!(via_format, via_prompt);
+        }
+
+        #[test]
+        fn format_table_override() {
+            let output = WorkDoneOutput;
+            let via_format = output.format(Some(CliOutputFormat::Table));
+            let via_text = output.to_text();
+            assert_eq!(via_format, via_text);
+        }
+
+        #[test]
+        fn format_md_falls_back_to_text() {
+            let output = WorkDoneOutput;
+            let via_format = output.format(Some(CliOutputFormat::Md));
+            let via_text = output.to_text();
+            assert_eq!(via_format, via_text);
+        }
+
+        #[test]
+        fn format_yaml_falls_back_to_text() {
+            let output = WorkDoneOutput;
+            let via_format = output.format(Some(CliOutputFormat::Yaml));
+            let via_text = output.to_text();
+            assert_eq!(via_format, via_text);
+        }
     }
 
-    // Next actions
-    if !summary.next_actions.is_empty() {
-        md.push_str("## Next Actions\n\n");
-        for a in &summary.next_actions {
-            md.push_str(&format!(
-                "- `[{}]` {} > {}\n",
-                a.priority, a.project_name, a.task_title
+    // =========================================================================
+    // OutputType conversion tests
+    // =========================================================================
+
+    mod output_type_conversions {
+        use super::*;
+
+        #[test]
+        fn output_type_to_cli_format() {
+            assert!(matches!(
+                CliOutputFormat::from(OutputType::Text),
+                CliOutputFormat::Table
+            ));
+            assert!(matches!(
+                CliOutputFormat::from(OutputType::Prompt),
+                CliOutputFormat::Prompt
+            ));
+            assert!(matches!(
+                CliOutputFormat::from(OutputType::Json),
+                CliOutputFormat::Json
             ));
         }
+
+        #[test]
+        fn cli_format_to_output_type() {
+            assert_eq!(OutputType::from(CliOutputFormat::Table), OutputType::Text);
+            assert_eq!(OutputType::from(CliOutputFormat::Json), OutputType::Json);
+            assert_eq!(
+                OutputType::from(CliOutputFormat::Prompt),
+                OutputType::Prompt
+            );
+            assert_eq!(OutputType::from(CliOutputFormat::Md), OutputType::Text);
+            assert_eq!(OutputType::from(CliOutputFormat::Yaml), OutputType::Json);
+        }
+
+        #[test]
+        fn output_type_default_is_text() {
+            assert_eq!(OutputType::default(), OutputType::Text);
+        }
     }
-
-    md
-}
-
-// === Worker YAML formatters ===
-
-fn yaml_format_worker(worker: &worker::Worker) -> String {
-    serde_yaml::to_string(worker).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_workers(workers: &[worker::Worker]) -> String {
-    serde_yaml::to_string(workers).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-// === Run YAML formatters ===
-
-fn yaml_format_run(run: &Run) -> String {
-    serde_yaml::to_string(run).unwrap_or_else(|_| "Error formatting YAML".to_string())
-}
-
-fn yaml_format_runs(runs: &[Run]) -> String {
-    serde_yaml::to_string(runs).unwrap_or_else(|_| "Error formatting YAML".to_string())
 }

@@ -166,7 +166,7 @@ pub async fn run_granary(workspace: &PathBuf, args: &[&str]) -> Result<String, S
 }
 
 pub async fn load_projects(workspace: PathBuf) -> Result<Vec<Project>, String> {
-    let output = run_granary(&workspace, &["projects", "--json"]).await?;
+    let output = run_granary(&workspace, &["projects", "--all", "--json"]).await?;
     parse_json_logged(&output, "projects --json")
 }
 
@@ -580,7 +580,7 @@ pub async fn load_runs(
     worker_id: Option<String>,
     status: Option<String>,
 ) -> Result<Vec<Run>, String> {
-    let mut args = vec!["runs"];
+    let mut args = vec!["runs", "--all"];
 
     let worker_flag;
     if let Some(ref w) = worker_id {

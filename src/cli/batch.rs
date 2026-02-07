@@ -1,11 +1,11 @@
 use std::io::{self, BufRead, Read};
 
+use crate::cli::args::CliOutputFormat;
 use crate::error::Result;
-use crate::output::OutputFormat;
 use crate::services::{self, Workspace, batch_service::BatchRequest};
 
 /// Apply a batch of operations from JSON
-pub async fn apply(stdin: bool, format: OutputFormat) -> Result<()> {
+pub async fn apply(stdin: bool, format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -23,7 +23,7 @@ pub async fn apply(stdin: bool, format: OutputFormat) -> Result<()> {
     let results = services::apply_batch(&pool, &request).await?;
 
     match format {
-        OutputFormat::Json => {
+        Some(CliOutputFormat::Json) => {
             println!("{}", serde_json::to_string_pretty(&results)?);
         }
         _ => {
@@ -57,7 +57,7 @@ pub async fn apply(stdin: bool, format: OutputFormat) -> Result<()> {
 }
 
 /// Process a batch of operations from JSONL (one JSON object per line)
-pub async fn batch(stdin: bool, format: OutputFormat) -> Result<()> {
+pub async fn batch(stdin: bool, format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -84,7 +84,7 @@ pub async fn batch(stdin: bool, format: OutputFormat) -> Result<()> {
     }
 
     match format {
-        OutputFormat::Json => {
+        Some(CliOutputFormat::Json) => {
             println!("{}", serde_json::to_string_pretty(&all_results)?);
         }
         _ => {

@@ -2,8 +2,6 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::output::OutputFormat;
-
 /// Granary - A CLI context hub for agentic work
 #[derive(Parser)]
 #[command(name = "granary")]
@@ -27,13 +25,21 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// Output format
-    #[arg(long, global = true, value_enum, default_value = "table")]
-    pub format: CliOutputFormat,
+    /// Output format (table, json, yaml, md, prompt)
+    #[arg(long, short = 'f', global = true, value_enum)]
+    pub format: Option<CliOutputFormat>,
 
-    /// JSON output (shorthand for --format json)
-    #[arg(long, global = true)]
+    /// Shorthand for --format=json
+    #[arg(long, global = true, conflicts_with_all = ["prompt", "text"])]
     pub json: bool,
+
+    /// Shorthand for --format=prompt (LLM-optimized output)
+    #[arg(long, global = true, conflicts_with_all = ["json", "text"])]
+    pub prompt: bool,
+
+    /// Shorthand for --format=table (text output)
+    #[arg(long, global = true, conflicts_with_all = ["json", "prompt"])]
+    pub text: bool,
 
     /// Workspace path override
     #[arg(long, global = true, env = "GRANARY_HOME")]
@@ -53,11 +59,18 @@ pub struct Cli {
 }
 
 impl Cli {
-    pub fn output_format(&self) -> OutputFormat {
+    /// Returns Some(format) if user explicitly specified via --format flag or shorthand flags,
+    /// None to use command default. All commands use this to respect explicit user overrides
+    /// while allowing command-specific defaults via the Output trait.
+    pub fn output_format_override(&self) -> Option<CliOutputFormat> {
         if self.json {
-            OutputFormat::Json
+            Some(CliOutputFormat::Json)
+        } else if self.prompt {
+            Some(CliOutputFormat::Prompt)
+        } else if self.text {
+            Some(CliOutputFormat::Table)
         } else {
-            self.format.into()
+            self.format
         }
     }
 }
@@ -70,18 +83,6 @@ pub enum CliOutputFormat {
     Yaml,
     Md,
     Prompt,
-}
-
-impl From<CliOutputFormat> for OutputFormat {
-    fn from(f: CliOutputFormat) -> Self {
-        match f {
-            CliOutputFormat::Table => OutputFormat::Table,
-            CliOutputFormat::Json => OutputFormat::Json,
-            CliOutputFormat::Yaml => OutputFormat::Yaml,
-            CliOutputFormat::Md => OutputFormat::Md,
-            CliOutputFormat::Prompt => OutputFormat::Prompt,
-        }
-    }
 }
 
 #[derive(Subcommand)]

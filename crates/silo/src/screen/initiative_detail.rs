@@ -400,25 +400,16 @@ fn view_projects_section<'a>(
             .center_x(Length::Fill)
             .into()
         } else {
-            // Create rows with 2-3 cards each for responsive grid
-            let mut rows: Vec<Element<'a, Message>> = Vec::new();
-            for chunk in summary.projects.chunks(3) {
-                let mut row_content = row![].spacing(12);
-                for project in chunk {
-                    row_content = row_content.push(
-                        container(view_project_card(project, palette))
-                            .width(Length::FillPortion(1)),
-                    );
-                }
-                // Fill empty slots if less than 3 cards
-                let remaining = 3 - chunk.len();
-                for _ in 0..remaining {
-                    row_content = row_content.push(Space::new(Length::FillPortion(1), 0));
-                }
-                rows.push(row_content.into());
+            // Create a vertical list of project cards
+            let mut items: Vec<Element<'a, Message>> = Vec::new();
+            for project in &summary.projects {
+                items.push(view_project_card(project, palette));
             }
 
-            Column::from_vec(rows).spacing(12).into()
+            Column::from_vec(items)
+                .spacing(8)
+                .width(Length::Fill)
+                .into()
         }
     } else {
         container(
@@ -520,6 +511,7 @@ fn view_project_card<'a>(
     let card_hover = palette.card_hover;
     let border = palette.border;
     let border_hover = palette.border_hover;
+    let text_color = palette.text;
     let project_id = project.id.clone();
 
     button(
@@ -556,6 +548,7 @@ fn view_project_card<'a>(
         };
         button::Style {
             background: Some(Background::Color(bg)),
+            text_color: text_color,
             border: Border {
                 color: bdr,
                 width: 1.0,
@@ -792,15 +785,173 @@ fn view_task_row<'a>(
         _ => Space::new(0, 0).into(),
     };
 
-    let content = row![header_row, quick_action]
-        .spacing(12)
-        .align_y(iced::Alignment::Center);
+    // Build content based on expanded state
+    let content: Element<'a, Message> = if is_expanded {
+        let mut details: Vec<Element<'a, Message>> = Vec::new();
+
+        // Description
+        if let Some(desc) = &task.description
+            && !desc.is_empty()
+        {
+            details.push(
+                column![
+                    text("Description").size(11).color(palette.text_muted),
+                    text(desc.clone()).size(13).color(palette.text_secondary),
+                ]
+                .spacing(4)
+                .into(),
+            );
+        }
+
+        // Owner
+        if let Some(owner) = &task.owner {
+            details.push(
+                row![
+                    text("Owner:").size(11).color(palette.text_muted),
+                    text(owner.clone()).size(11).color(palette.text_secondary),
+                ]
+                .spacing(8)
+                .into(),
+            );
+        }
+
+        // Tags
+        if let Some(tags) = &task.tags
+            && !tags.is_empty()
+        {
+            details.push(
+                row![
+                    text("Tags:").size(11).color(palette.text_muted),
+                    text(tags.clone()).size(11).color(palette.accent),
+                ]
+                .spacing(8)
+                .into(),
+            );
+        }
+
+        // Blocked reason
+        if let Some(reason) = &task.blocked_reason
+            && !reason.is_empty()
+        {
+            details.push(
+                row![
+                    text("Blocked:").size(11).color(palette.status_blocked),
+                    text(reason.clone()).size(11).color(palette.status_blocked),
+                ]
+                .spacing(8)
+                .into(),
+            );
+        }
+
+        // Due date
+        if let Some(due) = &task.due_at {
+            details.push(
+                row![
+                    text("Due:").size(11).color(palette.text_muted),
+                    text(due.clone()).size(11).color(palette.text_secondary),
+                ]
+                .spacing(8)
+                .into(),
+            );
+        }
+
+        // Started at
+        if let Some(started) = &task.started_at {
+            details.push(
+                row![
+                    text("Started:").size(11).color(palette.text_muted),
+                    text(started.clone()).size(11).color(palette.text_secondary),
+                ]
+                .spacing(8)
+                .into(),
+            );
+        }
+
+        // Completed at
+        if let Some(completed) = &task.completed_at {
+            details.push(
+                row![
+                    text("Completed:").size(11).color(palette.text_muted),
+                    text(completed.clone()).size(11).color(palette.status_done),
+                ]
+                .spacing(8)
+                .into(),
+            );
+        }
+
+        // Task ID
+        details.push(
+            row![
+                text("ID:").size(10).color(palette.text_muted),
+                text(task_id.clone())
+                    .size(10)
+                    .color(palette.text_muted)
+                    .font(iced::Font::MONOSPACE),
+            ]
+            .spacing(8)
+            .into(),
+        );
+
+        // Created/Updated
+        let bg_secondary = palette.background;
+        details.push(
+            row![
+                text("Created:").size(10).color(palette.text_muted),
+                text(task.created_at.clone())
+                    .size(10)
+                    .color(palette.text_muted),
+                Space::with_width(16),
+                text("Updated:").size(10).color(palette.text_muted),
+                text(task.updated_at.clone())
+                    .size(10)
+                    .color(palette.text_muted),
+            ]
+            .spacing(4)
+            .into(),
+        );
+
+        let details_section = if details.is_empty() {
+            column![
+                text("No additional details")
+                    .size(12)
+                    .color(palette.text_muted)
+            ]
+        } else {
+            Column::from_vec(details).spacing(8)
+        };
+
+        column![
+            row![column![header_row,].width(Length::Fill), quick_action,]
+                .spacing(12)
+                .align_y(iced::Alignment::Center),
+            Space::with_height(12),
+            container(details_section)
+                .padding(Padding::from([12, 16]))
+                .width(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(Background::Color(bg_secondary)),
+                    border: Border {
+                        radius: Radius::from(6.0),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+        ]
+        .into()
+    } else {
+        // Collapsed view
+        row![header_row, quick_action]
+            .spacing(12)
+            .align_y(iced::Alignment::Center)
+            .into()
+    };
 
     // Card wrapper
     let bg = palette.card;
     let bg_hover = palette.card_hover;
     let border = palette.border;
     let border_hov = palette.border_hover;
+    let text_color = palette.text;
 
     button(container(content).padding(16).width(Length::Fill))
         .on_press(Message::ToggleTaskExpand(task_id))
@@ -811,6 +962,7 @@ fn view_task_row<'a>(
             };
             button::Style {
                 background: Some(Background::Color(bg_color)),
+                text_color: text_color,
                 border: Border {
                     color: border_color,
                     width: 1.0,
