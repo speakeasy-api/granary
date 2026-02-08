@@ -5,6 +5,7 @@ use granary::cli::args::{Cli, Commands};
 use granary::cli::{
     batch, checkpoints, config, daemon, entrypoint, events, init, initiate, initiatives, plan,
     projects, run, search, sessions, show, summary, tasks, update, work, worker, workers,
+    workspace,
 };
 use granary::error::{GranaryError, exit_codes};
 
@@ -35,8 +36,36 @@ async fn run(cli: Cli) -> granary::Result<()> {
     };
 
     match command {
-        Commands::Init => {
-            init::init().await?;
+        Commands::Init {
+            local,
+            force,
+            skip_git_check,
+        } => {
+            if local {
+                // --local: delegate to workspace init --local (same behavior as before)
+                workspace::workspace_init(true, force, skip_git_check, None, format_override)
+                    .await?;
+            } else {
+                // Default: generate a random workspace name (e.g. workspace_a3f1k)
+                let random_suffix = nanoid::nanoid!(5, &nanoid::alphabet::SAFE);
+                let generated_name = format!("workspace_{}", random_suffix);
+                workspace::workspace_init(
+                    false,
+                    force,
+                    skip_git_check,
+                    Some(generated_name),
+                    format_override,
+                )
+                .await?;
+            }
+        }
+
+        Commands::Workspace { action } => {
+            workspace::workspace(action, format_override).await?;
+        }
+
+        Commands::Workspaces => {
+            workspace::workspace_list(format_override).await?;
         }
 
         Commands::Doctor => {

@@ -44,7 +44,7 @@ thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 
 # Utilities
-rand = "0.9"
+rand = "0.10"
 uuid = { version = "1", features = ["v4"] }
 dirs = "6.0"
 toml = "0.9"
@@ -64,6 +64,7 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
+nanoid = "0.4.0"
 
 # Unix-specific dependencies (for process groups)
 [target.'cfg(unix)'.dependencies]

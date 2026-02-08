@@ -12,11 +12,36 @@ pub mod exit_codes {
 
 #[derive(Error, Debug)]
 pub enum GranaryError {
-    #[error("Workspace not found. Run 'granary init' first.")]
-    WorkspaceNotFound,
+    #[error("Workspace not found at specified path: {0}")]
+    WorkspaceNotFound(String),
 
     #[error("Workspace already exists at {0}")]
     WorkspaceAlreadyExists(String),
+
+    #[error("Workspace registry error: {0}")]
+    WorkspaceRegistry(String),
+
+    #[error(
+        "Directory already belongs to workspace \"{workspace}\". Remove it first with 'granary workspace {workspace} remove'."
+    )]
+    DirectoryAlreadyRegistered { path: String, workspace: String },
+
+    #[error("Not in a workspace root: {0}")]
+    NotWorkspaceRoot(String),
+
+    #[error(
+        "Workspace already initialized locally at ./.granary. Use --force to overwrite, or run 'granary workspace migrate --global' to migrate to a named workspace."
+    )]
+    LocalWorkspaceExistsGlobal,
+
+    #[error("Workspace already initialized locally at ./.granary. Use --force to overwrite.")]
+    LocalWorkspaceExistsLocal,
+
+    #[error("Already inside workspace at {0}. Use --force to initialize a nested workspace.")]
+    NestedWorkspace(String),
+
+    #[error("Not in git repository root (git root is {0}). Use --skip-git-check if intentional.")]
+    NotGitRoot(String),
 
     #[error("Project not found: {0}")]
     ProjectNotFound(String),
@@ -124,11 +149,17 @@ impl From<anyhow::Error> for GranaryError {
 impl GranaryError {
     pub fn exit_code(&self) -> i32 {
         match self {
-            // User errors (bad arguments, invalid input)
-            GranaryError::InvalidArgument(_) | GranaryError::InvalidId(_) => exit_codes::USER_ERROR,
+            // User errors (bad arguments, invalid input, workspace validation)
+            GranaryError::InvalidArgument(_)
+            | GranaryError::InvalidId(_)
+            | GranaryError::NotWorkspaceRoot(_)
+            | GranaryError::LocalWorkspaceExistsGlobal
+            | GranaryError::LocalWorkspaceExistsLocal
+            | GranaryError::NestedWorkspace(_)
+            | GranaryError::NotGitRoot(_) => exit_codes::USER_ERROR,
 
             // Not found errors
-            GranaryError::WorkspaceNotFound
+            GranaryError::WorkspaceNotFound(_)
             | GranaryError::ProjectNotFound(_)
             | GranaryError::TaskNotFound(_)
             | GranaryError::CommentNotFound(_)
@@ -141,11 +172,12 @@ impl GranaryError {
             | GranaryError::RunnerNotFound(_)
             | GranaryError::NoActiveSession => exit_codes::NOT_FOUND,
 
-            // Conflict errors (concurrency, claims)
+            // Conflict errors (concurrency, claims, registry)
             GranaryError::Conflict(_)
             | GranaryError::VersionMismatch { .. }
             | GranaryError::ClaimConflict { .. }
             | GranaryError::WorkspaceAlreadyExists(_)
+            | GranaryError::DirectoryAlreadyRegistered { .. }
             | GranaryError::DependencyCycle(_) => exit_codes::CONFLICT,
 
             // Blocked errors (deps unmet, task blocked)
@@ -166,6 +198,7 @@ impl GranaryError {
             | GranaryError::DaemonConnection(_)
             | GranaryError::DaemonProtocol(_)
             | GranaryError::DaemonError(_)
+            | GranaryError::WorkspaceRegistry(_)
             | GranaryError::Other(_) => exit_codes::INTERNAL,
         }
     }

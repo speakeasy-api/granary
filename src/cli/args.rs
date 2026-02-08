@@ -87,8 +87,29 @@ pub enum CliOutputFormat {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Initialize a new workspace
-    Init,
+    /// Initialize a new workspace (alias for `workspace init`)
+    Init {
+        /// Create a local .granary/ directory instead of a named workspace
+        #[arg(long)]
+        local: bool,
+
+        /// Force initialization even if workspace already exists
+        #[arg(long)]
+        force: bool,
+
+        /// Skip git root directory check
+        #[arg(long)]
+        skip_git_check: bool,
+    },
+
+    /// Manage workspaces
+    Workspace {
+        #[command(subcommand)]
+        action: Option<WorkspaceAction>,
+    },
+
+    /// List all workspaces (alias for `workspace list`)
+    Workspaces,
 
     /// Check workspace health
     Doctor,
@@ -1291,4 +1312,142 @@ pub enum DaemonCommand {
         #[arg(short = 'n', long, default_value = "50")]
         lines: usize,
     },
+}
+
+#[derive(Subcommand)]
+pub enum WorkspaceAction {
+    /// Initialize a new workspace for the current directory
+    Init {
+        /// Create a local .granary/ directory instead of a named workspace
+        #[arg(long)]
+        local: bool,
+
+        /// Force initialization even if workspace already exists
+        #[arg(long)]
+        force: bool,
+
+        /// Skip git root directory check
+        #[arg(long)]
+        skip_git_check: bool,
+
+        /// Workspace name (derived from directory name if not specified)
+        #[arg(long)]
+        name: Option<String>,
+    },
+
+    /// List all workspaces
+    List,
+
+    /// Catch-all for `granary workspace <name> [add|remove|move <target>]`
+    #[command(external_subcommand)]
+    Named(Vec<String>),
+}
+
+#[derive(Debug)]
+pub enum NamedWorkspaceAction {
+    /// Show info about the named workspace
+    Info,
+    /// Add current directory to the named workspace
+    Add,
+    /// Remove current directory from the named workspace
+    Remove,
+    /// Move workspace root from current directory to a new path
+    Move { target: PathBuf },
+    /// Migrate between local and global workspace modes
+    Migrate {
+        /// Migrate to global mode
+        global: bool,
+        /// Migrate to local mode
+        local: bool,
+        /// Workspace name override (for --global)
+        name: Option<String>,
+    },
+}
+
+impl NamedWorkspaceAction {
+    /// Parse a named workspace action from external subcommand args.
+    /// args[0] is the workspace name, args[1..] is the action.
+    pub fn parse(args: &[String]) -> Result<(String, Self), String> {
+        if args.is_empty() {
+            return Err("Workspace name is required".to_string());
+        }
+
+        let name = args[0].clone();
+
+        if args.len() == 1 {
+            return Ok((name, Self::Info));
+        }
+
+        match args[1].as_str() {
+            "add" => {
+                if args.len() > 2 {
+                    return Err("'add' takes no additional arguments".to_string());
+                }
+                Ok((name, Self::Add))
+            }
+            "remove" => {
+                if args.len() > 2 {
+                    return Err("'remove' takes no additional arguments".to_string());
+                }
+                Ok((name, Self::Remove))
+            }
+            "move" => {
+                if args.len() != 3 {
+                    return Err("Usage: granary workspace <name> move <target>".to_string());
+                }
+                Ok((
+                    name,
+                    Self::Move {
+                        target: PathBuf::from(&args[2]),
+                    },
+                ))
+            }
+            "migrate" => {
+                let mut global = false;
+                let mut local = false;
+                let mut migrate_name: Option<String> = None;
+                let mut i = 2;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--global" => global = true,
+                        "--local" => local = true,
+                        "--name" => {
+                            i += 1;
+                            if i >= args.len() {
+                                return Err("--name requires a value".to_string());
+                            }
+                            migrate_name = Some(args[i].clone());
+                        }
+                        other => {
+                            return Err(format!(
+                                "Unknown migrate flag '{}'. Expected: --global, --local, --name",
+                                other
+                            ));
+                        }
+                    }
+                    i += 1;
+                }
+                if !global && !local {
+                    return Err(
+                        "Usage: granary workspace <name> migrate --global|--local".to_string()
+                    );
+                }
+                if global && local {
+                    return Err("Cannot specify both --global and --local".to_string());
+                }
+                Ok((
+                    name,
+                    Self::Migrate {
+                        global,
+                        local,
+                        name: migrate_name,
+                    },
+                ))
+            }
+            other => Err(format!(
+                "Unknown workspace action '{}'. Expected: add, remove, move, migrate",
+                other
+            )),
+        }
+    }
 }

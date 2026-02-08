@@ -3,7 +3,7 @@
 //! This module provides functions for generating and parsing various entity IDs
 //! used throughout granary (projects, tasks, initiatives, sessions, etc.).
 
-use rand::Rng;
+use rand::RngExt;
 use std::fmt;
 
 /// Base32 alphabet (Crockford-style, excludes I, L, O, U to avoid confusion)

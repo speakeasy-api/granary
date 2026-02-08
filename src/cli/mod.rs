@@ -22,5 +22,6 @@ pub mod watch;
 pub mod work;
 pub mod worker;
 pub mod workers;
+pub mod workspace;
 
 pub use args::*;

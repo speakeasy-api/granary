@@ -16,6 +16,7 @@ pub mod task_service;
 pub mod template;
 pub mod worker_runtime;
 pub mod workspace;
+pub mod workspace_registry;
 
 // Test modules
 #[cfg(test)]
@@ -48,3 +49,4 @@ pub use worker_runtime::{
     start_worker_runtime,
 };
 pub use workspace::*;
+pub use workspace_registry::WorkspaceRegistry;

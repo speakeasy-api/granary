@@ -548,7 +548,7 @@ fn view_project_card<'a>(
         };
         button::Style {
             background: Some(Background::Color(bg)),
-            text_color: text_color,
+            text_color,
             border: Border {
                 color: bdr,
                 width: 1.0,
@@ -962,7 +962,7 @@ fn view_task_row<'a>(
             };
             button::Style {
                 background: Some(Background::Color(bg_color)),
-                text_color: text_color,
+                text_color,
                 border: Border {
                     color: border_color,
                     width: 1.0,
