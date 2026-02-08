@@ -215,23 +215,41 @@ impl Workspace {
 
     /// Open an existing workspace at the specified path.
     ///
-    /// Unlike `find()`, this does not walk up the directory tree.
-    /// The path should be the root directory containing `.granary/`.
+    /// Checks for a local `.granary/` directory first, then falls back to
+    /// registry lookup for named workspaces whose data lives under
+    /// `~/.granary/workspaces/<name>/`.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         let granary_dir = root.join(WORKSPACE_DIR);
 
-        if !granary_dir.exists() {
-            return Err(GranaryError::WorkspaceNotFound(root.display().to_string()));
+        // Local .granary/ directory exists — use it directly
+        if granary_dir.exists() {
+            return Ok(Self {
+                name: None,
+                root,
+                granary_dir: granary_dir.clone(),
+                db_path: granary_dir.join(DB_FILE),
+                mode: WorkspaceMode::Local,
+            });
         }
 
-        Ok(Self {
-            name: None,
-            root,
-            granary_dir: granary_dir.clone(),
-            db_path: granary_dir.join(DB_FILE),
-            mode: WorkspaceMode::Local,
-        })
+        // Fall back to registry: the path may be a root registered to a named workspace
+        if let Ok(registry) = WorkspaceRegistry::load() {
+            if let Some(workspace_name) = registry.lookup_root(&root) {
+                if let Ok(db_path) = WorkspaceRegistry::workspace_db_path(workspace_name) {
+                    let ws_dir = db_path.parent().unwrap().to_path_buf();
+                    return Ok(Self {
+                        name: Some(workspace_name.to_string()),
+                        root,
+                        granary_dir: ws_dir,
+                        db_path,
+                        mode: WorkspaceMode::Named(workspace_name.to_string()),
+                    });
+                }
+            }
+        }
+
+        Err(GranaryError::WorkspaceNotFound(root.display().to_string()))
     }
 
     /// Initialize the database and run migrations
