@@ -112,7 +112,11 @@ pub enum Commands {
     Workspaces,
 
     /// Check workspace health
-    Doctor,
+    Doctor {
+        /// Automatically fix issues (e.g. add missing granary instructions to agent files)
+        #[arg(long)]
+        fix: bool,
+    },
 
     /// Plan a new feature - creates project and guides task creation
     #[command(

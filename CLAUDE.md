@@ -1,6 +1,6 @@
 After implementation is complete, use `cargo fmt` to format files.
 
-When user asks "use granary" run `granary` command first
+IMPORTANT: when user requests to "use granary", run `granary` command before performing any other task.
 
 ## Iced GUI Development
 

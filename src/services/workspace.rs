@@ -480,6 +480,7 @@ pub enum DiagnosticStatus {
     Warning,
     Error,
     Info,
+    Fix,
 }
 
 #[derive(Debug)]
@@ -496,6 +497,17 @@ impl DiagnosticResult {
             DiagnosticStatus::Warning => "[WARN]",
             DiagnosticStatus::Error => "[ERR]",
             DiagnosticStatus::Info => "[INFO]",
+            DiagnosticStatus::Fix => "[FIX]",
+        }
+    }
+
+    pub fn status_str(&self) -> &'static str {
+        match self.status {
+            DiagnosticStatus::Ok => "ok",
+            DiagnosticStatus::Warning => "warning",
+            DiagnosticStatus::Error => "error",
+            DiagnosticStatus::Info => "info",
+            DiagnosticStatus::Fix => "fixed",
         }
     }
 }

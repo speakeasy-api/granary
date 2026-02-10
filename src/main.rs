@@ -68,8 +68,8 @@ async fn run(cli: Cli) -> granary::Result<()> {
             workspace::workspace_list(format_override).await?;
         }
 
-        Commands::Doctor => {
-            init::doctor().await?;
+        Commands::Doctor { fix } => {
+            init::doctor(fix, format_override).await?;
         }
 
         Commands::Plan { name, project } => {
