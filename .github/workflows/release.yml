@@ -48,6 +48,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev pkg-config
+
       - name: Install cross-compilation tools
         if: matrix.cross
         uses: taiki-e/setup-cross-toolchain-action@v1
@@ -57,18 +63,45 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Create Silo.app bundle
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p Silo.app/Contents/MacOS Silo.app/Contents/Resources
+          cp target/${{ matrix.target }}/release/silo Silo.app/Contents/MacOS/Silo
+          VERSION=${GITHUB_REF_NAME#v}
+          cat > Silo.app/Contents/Info.plist << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Silo</string>
+            <key>CFBundleDisplayName</key><string>Silo</string>
+            <key>CFBundleExecutable</key><string>Silo</string>
+            <key>CFBundleIdentifier</key><string>com.granary.silo</string>
+            <key>CFBundleVersion</key><string>$VERSION</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+
       - name: Package (Unix)
         if: matrix.os != 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
-          tar -czvf ../../../granary-${{ matrix.target }}.tar.gz granary
+          if [ -d ../../../Silo.app ]; then
+            tar -czvf ../../../granary-${{ matrix.target }}.tar.gz granary granaryd silo -C ../../.. Silo.app
+          else
+            tar -czvf ../../../granary-${{ matrix.target }}.tar.gz granary granaryd silo
+          fi
           cd ../../..
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../granary-${{ matrix.target }}.zip granary.exe
+          7z a ../../../granary-${{ matrix.target }}.zip granary.exe granaryd.exe silo.exe
           cd ../../..
 
       - name: Upload artifact

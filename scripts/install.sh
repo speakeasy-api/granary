@@ -172,12 +172,14 @@ main() {
     # Create install directory if it doesn't exist
     mkdir -p "$INSTALL_DIR"
 
-    # Install binary
+    # Install binaries
     info "Installing to ${INSTALL_DIR}..."
     mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
     chmod +x "$INSTALL_DIR/$BINARY_NAME"
+    mv "$TMP_DIR/granaryd" "$INSTALL_DIR/granaryd"
+    chmod +x "$INSTALL_DIR/granaryd"
 
-    success "Granary ${VERSION} installed successfully!"
+    success "Granary ${VERSION} installed successfully (granary + granaryd)!"
 
     # Check if install directory is in PATH
     case ":$PATH:" in
