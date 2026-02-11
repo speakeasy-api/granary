@@ -26,7 +26,7 @@ use granary_types::{
     Initiative, InitiativeSummary, Project, Run, RunnerConfig, Task as GranaryTask, TaskDependency,
     Worker,
 };
-use iced::widget::{Space, column, container, text};
+use iced::widget::{Space, column, container, text, text_editor};
 use iced::{Alignment, Element, Length};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -134,11 +134,15 @@ pub struct ScreenContext<'a> {
     pub edit_task_form: Option<&'a edit_task::EditTaskForm>,
     // Create project form
     pub create_project_name: &'a str,
-    pub create_project_description: &'a str,
+    pub create_project_desc_content: &'a text_editor::Content,
     pub create_project_owner: &'a str,
     pub create_project_tags: &'a str,
     // Edit project form
     pub edit_project_form: Option<&'a edit_project::EditProjectForm>,
+    pub edit_project_desc_content: &'a text_editor::Content,
+    // Description content for task forms
+    pub create_task_desc_content: &'a text_editor::Content,
+    pub edit_task_desc_content: &'a text_editor::Content,
     // Initiatives
     pub initiatives: &'a [Initiative],
     pub selected_initiative: Option<&'a Initiative>,
@@ -236,7 +240,7 @@ pub fn dispatch_view<'a>(
         Screen::CreateProject => {
             let state = create_project::CreateProjectState {
                 name: ctx.create_project_name,
-                description: ctx.create_project_description,
+                description_content: ctx.create_project_desc_content,
                 owner: ctx.create_project_owner,
                 tags: ctx.create_project_tags,
                 loading: ctx.loading,
@@ -249,6 +253,7 @@ pub fn dispatch_view<'a>(
             if let Some(form) = ctx.edit_project_form {
                 let state = edit_project::EditProjectState {
                     form,
+                    description_content: ctx.edit_project_desc_content,
                     loading: ctx.loading,
                     error_message: ctx.status_message,
                 };
@@ -269,6 +274,7 @@ pub fn dispatch_view<'a>(
                 let state = create_task::CreateTaskScreenState {
                     project_name,
                     form,
+                    description_content: ctx.create_task_desc_content,
                     available_tasks: ctx.tasks,
                 };
                 create_task::view(state, palette)
@@ -295,6 +301,7 @@ pub fn dispatch_view<'a>(
                 let state = edit_task::EditTaskScreenState {
                     project_name,
                     form,
+                    description_content: ctx.edit_task_desc_content,
                     available_tasks: ctx.tasks,
                     loading: ctx.loading,
                 };

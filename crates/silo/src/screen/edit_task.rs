@@ -9,7 +9,7 @@ use granary_types::{Task as GranaryTask, TaskPriority, TaskStatus};
 use iced::border::Radius;
 use iced::widget::{
     Column, Space, button, column, container, horizontal_space, pick_list, row, scrollable, text,
-    text_input,
+    text_editor, text_input,
 };
 use iced::{Background, Border, Element, Length, Padding, Theme};
 use lucide_icons::Icon;
@@ -70,6 +70,7 @@ impl EditTaskForm {
 pub struct EditTaskScreenState<'a> {
     pub project_name: &'a str,
     pub form: &'a EditTaskForm,
+    pub description_content: &'a text_editor::Content,
     pub available_tasks: &'a [GranaryTask],
     pub loading: bool,
 }
@@ -136,12 +137,7 @@ fn view_form<'a>(state: &EditTaskScreenState<'a>, palette: &'a Palette) -> Eleme
     let description_field = view_field(
         "Description",
         false,
-        view_text_input(
-            "Enter description...",
-            &form.description,
-            Message::EditTaskFormDescription,
-            palette,
-        ),
+        view_description_editor(state.description_content, palette),
         None,
         palette,
     );
@@ -597,6 +593,44 @@ where
                 _ => border,
             };
             text_input::Style {
+                background: Background::Color(bg_input),
+                border: Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: Radius::from(appearance::CORNER_RADIUS),
+                },
+                icon: text_muted,
+                placeholder: text_muted,
+                value: text_primary,
+                selection: accent,
+            }
+        })
+        .into()
+}
+
+fn view_description_editor<'a>(
+    content: &'a text_editor::Content,
+    palette: &'a Palette,
+) -> Element<'a, Message> {
+    let accent = palette.accent;
+    let border_hover = palette.border_hover;
+    let border = palette.border;
+    let bg_input = palette.input;
+    let text_muted = palette.text_muted;
+    let text_primary = palette.text;
+
+    text_editor(content)
+        .placeholder("Enter description...")
+        .on_action(Message::EditTaskFormDescriptionAction)
+        .padding(12)
+        .height(Length::Fixed(120.0))
+        .style(move |_: &Theme, status| {
+            let border_color = match status {
+                text_editor::Status::Focused => accent,
+                text_editor::Status::Hovered => border_hover,
+                _ => border,
+            };
+            text_editor::Style {
                 background: Background::Color(bg_input),
                 border: Border {
                     color: border_color,

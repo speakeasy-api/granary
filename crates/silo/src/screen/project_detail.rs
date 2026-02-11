@@ -148,7 +148,7 @@ fn view_back_button<'a>(palette: &'a Palette) -> Element<'a, Message> {
         ]
         .spacing(4),
     )
-    .on_press(Message::BackToProjects)
+    .on_press(Message::GoBack)
     .style(move |_, status| {
         let (bg, txt) = match status {
             button::Status::Hovered => (hover_bg, accent),

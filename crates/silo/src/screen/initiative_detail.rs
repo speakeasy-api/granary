@@ -136,7 +136,7 @@ fn view_back_button<'a>(palette: &'a Palette) -> Element<'a, Message> {
         ]
         .spacing(4),
     )
-    .on_press(Message::NavigateToInitiatives)
+    .on_press(Message::GoBack)
     .style(move |_, status| {
         let (bg, txt) = match status {
             button::Status::Hovered => (hover_bg, accent),
@@ -592,7 +592,9 @@ fn view_blockers_section<'a>(
     let content = column![
         header,
         Space::with_height(12),
-        Column::from_vec(blocker_items).spacing(8),
+        Column::from_vec(blocker_items)
+            .spacing(8)
+            .width(Length::Fill),
     ]
     .width(Length::Fill);
 

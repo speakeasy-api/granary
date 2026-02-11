@@ -2,6 +2,7 @@ use granary_types::{
     Comment, Initiative, InitiativeSummary, Project, Run, RunnerConfig, Task as GranaryTask,
     TaskPriority, TaskStatus, Worker,
 };
+use iced::widget::text_editor;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -117,8 +118,8 @@ pub enum Message {
     // Project creation
     /// Create project form: name input changed
     CreateProjectNameChanged(String),
-    /// Create project form: description input changed
-    CreateProjectDescriptionChanged(String),
+    /// Create project form: description editor action
+    CreateProjectDescriptionAction(text_editor::Action),
     /// Create project form: owner input changed
     CreateProjectOwnerChanged(String),
     /// Create project form: tags input changed
@@ -135,8 +136,8 @@ pub enum Message {
     ShowEditProject(String),
     /// Edit project form: name input changed
     EditProjectNameChanged(String),
-    /// Edit project form: description input changed
-    EditProjectDescriptionChanged(String),
+    /// Edit project form: description editor action
+    EditProjectDescriptionAction(text_editor::Action),
     /// Edit project form: owner input changed
     EditProjectOwnerChanged(String),
     /// Edit project form: tags input changed
@@ -185,8 +186,8 @@ pub enum Message {
     // Task form state (for create screen)
     /// Create task form: title input changed
     CreateTaskFormTitle(String),
-    /// Create task form: description input changed
-    CreateTaskFormDescription(String),
+    /// Create task form: description editor action
+    CreateTaskFormDescriptionAction(text_editor::Action),
     /// Create task form: priority changed
     CreateTaskFormPriority(TaskPriority),
     /// Create task form: status changed
@@ -217,8 +218,8 @@ pub enum Message {
     EditTaskLoaded(Result<GranaryTask, String>),
     /// Edit task form: title input changed
     EditTaskFormTitle(String),
-    /// Edit task form: description input changed
-    EditTaskFormDescription(String),
+    /// Edit task form: description editor action
+    EditTaskFormDescriptionAction(text_editor::Action),
     /// Edit task form: priority changed
     EditTaskFormPriority(TaskPriority),
     /// Edit task form: status changed

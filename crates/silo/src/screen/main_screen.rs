@@ -39,6 +39,8 @@ pub struct MainScreenState<'a> {
     pub task_comments: &'a HashMap<String, Vec<Comment>>,
     pub comment_input: &'a str,
     pub comments_loading: bool,
+    /// Whether to show a back button (e.g., when navigated from initiatives)
+    pub show_back_button: bool,
 }
 
 /// Renders the main screen with projects and tasks panels.
@@ -84,7 +86,54 @@ fn view_header<'a>(state: &MainScreenState<'a>, palette: &'a Palette) -> Element
         .spacing(4)
         .align_x(iced::Alignment::End);
 
-    widget::page_header("Projects", trailing, palette)
+    if state.show_back_button {
+        let back_btn = view_back_button(palette);
+        let header_content = row![
+            back_btn,
+            Space::with_width(12),
+            text("Projects").size(22).color(palette.text),
+            horizontal_space(),
+            trailing,
+        ]
+        .align_y(iced::Alignment::Center);
+
+        header_content.into()
+    } else {
+        widget::page_header("Projects", trailing, palette)
+    }
+}
+
+/// Renders a back button for returning to the previous screen.
+fn view_back_button<'a>(palette: &'a Palette) -> Element<'a, Message> {
+    let text_color = palette.text_secondary;
+    let hover_bg = palette.card_hover;
+    let accent = palette.accent;
+
+    button(
+        row![
+            icon(Icon::ArrowLeft).size(14).color(text_color),
+            text(" Back").size(14).color(text_color)
+        ]
+        .spacing(4),
+    )
+    .on_press(Message::GoBack)
+    .style(move |_, status| {
+        let (bg, txt) = match status {
+            button::Status::Hovered => (hover_bg, accent),
+            _ => (Color::TRANSPARENT, text_color),
+        };
+        button::Style {
+            background: Some(Background::Color(bg)),
+            text_color: txt,
+            border: Border {
+                radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    })
+    .padding(Padding::from([6, 12]))
+    .into()
 }
 
 /// Renders the projects panel with project list and refresh button.

@@ -1,4 +1,4 @@
-use iced::widget::{column, container, horizontal_space, row, stack};
+use iced::widget::{column, container, horizontal_space, row, stack, text_editor};
 use iced::{Background, Element, Length, Subscription, Task};
 
 use crate::appearance::{self, Palette};
@@ -27,6 +27,27 @@ use granary_types::{
 use lucide_icons::Icon;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+
+/// Wrapper for text_editor::Content that implements Debug.
+pub struct EditorContent(pub text_editor::Content);
+
+impl std::fmt::Debug for EditorContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EditorContent").finish()
+    }
+}
+
+impl Default for EditorContent {
+    fn default() -> Self {
+        Self(text_editor::Content::new())
+    }
+}
+
+impl EditorContent {
+    fn with_text(text: &str) -> Self {
+        Self(text_editor::Content::with_text(text))
+    }
+}
 
 /// Form state for starting a new worker.
 #[derive(Debug, Default)]
@@ -113,6 +134,12 @@ pub struct Silo {
 
     // Edit project form state
     edit_project_form: Option<screen::edit_project::EditProjectForm>,
+
+    // Description editor content (stored separately as Content doesn't impl Clone)
+    create_task_desc_content: EditorContent,
+    edit_task_desc_content: EditorContent,
+    create_project_desc_content: EditorContent,
+    edit_project_desc_content: EditorContent,
 
     // Block task dialog
     blocking_task_id: Option<String>,
@@ -206,6 +233,12 @@ impl Silo {
 
             // Edit project form state
             edit_project_form: None,
+
+            // Description editor content
+            create_task_desc_content: EditorContent::default(),
+            edit_task_desc_content: EditorContent::default(),
+            create_project_desc_content: EditorContent::default(),
+            edit_project_desc_content: EditorContent::default(),
 
             // Block task dialog
             blocking_task_id: None,
@@ -386,11 +419,65 @@ impl Silo {
                             );
                         }
                     }
+                    screen::Screen::ProjectDetail { .. } => {
+                        if let Some(ws) = &self.workspace {
+                            let mut tasks = Vec::new();
+                            // Refresh projects list
+                            tasks.push(Task::perform(
+                                load_projects(ws.clone()),
+                                Message::ProjectsLoaded,
+                            ));
+                            // Refresh tasks for selected project
+                            if let Some(proj) = &self.selected_project {
+                                tasks.push(Task::perform(
+                                    load_tasks(ws.clone(), proj.clone()),
+                                    Message::TasksLoaded,
+                                ));
+                            }
+                            return Task::batch(tasks);
+                        }
+                    }
                     screen::Screen::Tasks => {
                         if let (Some(ws), Some(proj)) = (&self.workspace, &self.selected_project) {
                             return Task::perform(
                                 load_tasks(ws.clone(), proj.clone()),
                                 Message::TasksLoaded,
+                            );
+                        }
+                    }
+                    screen::Screen::Initiatives => {
+                        if let Some(ws) = &self.workspace {
+                            return Task::perform(
+                                load_initiatives(ws.clone()),
+                                Message::InitiativesLoaded,
+                            );
+                        }
+                    }
+                    screen::Screen::InitiativeDetail { id } => {
+                        if let Some(ws) = &self.workspace {
+                            return Task::perform(
+                                load_initiative_summary(ws.clone(), id.clone()),
+                                Message::InitiativeDetailLoaded,
+                            );
+                        }
+                    }
+                    screen::Screen::Workers => {
+                        if let Some(ws) = &self.workspace {
+                            return Task::perform(
+                                load_workers(ws.clone(), true),
+                                Message::WorkersLoaded,
+                            );
+                        }
+                    }
+                    screen::Screen::Runs => {
+                        if let Some(ws) = &self.workspace {
+                            return Task::perform(
+                                load_runs(
+                                    ws.clone(),
+                                    self.run_worker_filter.clone(),
+                                    self.run_status_filter.clone(),
+                                ),
+                                Message::RunsLoaded,
                             );
                         }
                     }
@@ -1349,6 +1436,7 @@ impl Silo {
                 self.create_project_description.clear();
                 self.create_project_owner.clear();
                 self.create_project_tags.clear();
+                self.create_project_desc_content = EditorContent::default();
                 self.screen_history.push(self.screen.clone());
                 self.screen = screen::Screen::CreateProject;
                 Task::none()
@@ -1357,8 +1445,9 @@ impl Silo {
                 self.create_project_name = value;
                 Task::none()
             }
-            Message::CreateProjectDescriptionChanged(value) => {
-                self.create_project_description = value;
+            Message::CreateProjectDescriptionAction(action) => {
+                self.create_project_desc_content.0.perform(action);
+                self.create_project_description = self.create_project_desc_content.0.text();
                 Task::none()
             }
             Message::CreateProjectOwnerChanged(value) => {
@@ -1428,10 +1517,12 @@ impl Silo {
             Message::ShowEditProject(project_id) => {
                 // Find the project and populate the form
                 if let Some(project) = self.projects.iter().find(|p| p.id == project_id) {
+                    let desc = project.description.clone().unwrap_or_default();
+                    self.edit_project_desc_content = EditorContent::with_text(&desc);
                     self.edit_project_form = Some(screen::edit_project::EditProjectForm {
                         project_id: project.id.clone(),
                         name: project.name.clone(),
-                        description: project.description.clone().unwrap_or_default(),
+                        description: desc,
                         owner: project.owner.clone().unwrap_or_default(),
                         tags: project.tags.clone().unwrap_or_default(),
                         submitting: false,
@@ -1447,9 +1538,10 @@ impl Silo {
                 }
                 Task::none()
             }
-            Message::EditProjectDescriptionChanged(value) => {
+            Message::EditProjectDescriptionAction(action) => {
+                self.edit_project_desc_content.0.perform(action);
                 if let Some(form) = &mut self.edit_project_form {
-                    form.description = value;
+                    form.description = self.edit_project_desc_content.0.text();
                 }
                 Task::none()
             }
@@ -1554,6 +1646,7 @@ impl Silo {
             }
             Message::OpenCreateTaskScreen { project_id } => {
                 self.create_task_form = Some(CreateTaskForm::new());
+                self.create_task_desc_content = EditorContent::default();
                 self.screen_history.push(self.screen.clone());
                 // Use provided project_id if available, otherwise fall back to selected_project
                 let effective_project_id = project_id.or_else(|| self.selected_project.clone());
@@ -1568,9 +1661,10 @@ impl Silo {
                 }
                 Task::none()
             }
-            Message::CreateTaskFormDescription(value) => {
+            Message::CreateTaskFormDescriptionAction(action) => {
+                self.create_task_desc_content.0.perform(action);
                 if let Some(form) = &mut self.create_task_form {
-                    form.description = value;
+                    form.description = self.create_task_desc_content.0.text();
                 }
                 Task::none()
             }
@@ -1795,6 +1889,8 @@ impl Silo {
                 self.loading = false;
                 match result {
                     Ok(task) => {
+                        let desc = task.description.clone().unwrap_or_default();
+                        self.edit_task_desc_content = EditorContent::with_text(&desc);
                         self.edit_task_form = Some(EditTaskForm::from_task(&task, Vec::new()));
                         self.screen_history.push(self.screen.clone());
                         self.screen = screen::Screen::EditTask { id: task.id };
@@ -1809,9 +1905,10 @@ impl Silo {
                 }
                 Task::none()
             }
-            Message::EditTaskFormDescription(value) => {
+            Message::EditTaskFormDescriptionAction(action) => {
+                self.edit_task_desc_content.0.perform(action);
                 if let Some(form) = &mut self.edit_task_form {
-                    form.description = value;
+                    form.description = self.edit_task_desc_content.0.text();
                 }
                 Task::none()
             }
@@ -2038,7 +2135,11 @@ impl Silo {
             // BackToProjects: Navigate back to projects list
             Message::BackToProjects => {
                 self.selected_project = None;
-                self.screen = screen::Screen::Projects;
+                if let Some(previous) = self.screen_history.pop() {
+                    self.screen = previous;
+                } else {
+                    self.screen = screen::Screen::Projects;
+                }
                 self.update(Message::RefreshProjects)
             }
 
@@ -2454,12 +2555,19 @@ impl Silo {
                     task_comments: &self.task_comments,
                     comment_input: &self.comment_input,
                     comments_loading: self.comments_loading,
+                    show_back_button: false,
                 };
                 screen::main_screen::view(state, palette)
             }
 
             screen::Screen::ProjectDetail { id: _ } => {
-                // For now, use main_screen view - could be enhanced later
+                // Show back button if navigated from initiatives
+                let show_back = self.screen_history.last().is_some_and(|s| {
+                    matches!(
+                        s,
+                        screen::Screen::Initiatives | screen::Screen::InitiativeDetail { .. }
+                    )
+                });
                 let state = screen::main_screen::MainScreenState {
                     workspace: self.workspace.as_ref(),
                     projects: &self.projects,
@@ -2473,6 +2581,7 @@ impl Silo {
                     task_comments: &self.task_comments,
                     comment_input: &self.comment_input,
                     comments_loading: self.comments_loading,
+                    show_back_button: show_back,
                 };
                 screen::main_screen::view(state, palette)
             }
@@ -2552,7 +2661,7 @@ impl Silo {
             screen::Screen::CreateProject => {
                 let state = screen::create_project::CreateProjectState {
                     name: &self.create_project_name,
-                    description: &self.create_project_description,
+                    description_content: &self.create_project_desc_content.0,
                     owner: &self.create_project_owner,
                     tags: &self.create_project_tags,
                     loading: self.loading,
@@ -2565,6 +2674,7 @@ impl Silo {
                 if let Some(form) = &self.edit_project_form {
                     let state = screen::edit_project::EditProjectState {
                         form,
+                        description_content: &self.edit_project_desc_content.0,
                         loading: self.loading,
                         error_message: self.status_message.as_ref(),
                     };
@@ -2586,6 +2696,7 @@ impl Silo {
                         project_name,
                         form,
                         available_tasks: &self.tasks,
+                        description_content: &self.create_task_desc_content.0,
                     };
                     screen::create_task::view(state, palette)
                 } else {
@@ -2612,6 +2723,7 @@ impl Silo {
                         form,
                         available_tasks: &self.tasks,
                         loading: self.loading,
+                        description_content: &self.edit_task_desc_content.0,
                     };
                     screen::edit_task::view(state, palette)
                 } else {

@@ -7,7 +7,8 @@ use crate::appearance::{self, Palette};
 use crate::message::Message;
 use iced::border::Radius;
 use iced::widget::{
-    Space, button, column, container, horizontal_space, row, scrollable, text, text_input,
+    Space, button, column, container, horizontal_space, row, scrollable, text, text_editor,
+    text_input,
 };
 use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 
@@ -19,7 +20,7 @@ type Renderer = iced::Renderer;
 /// borrowed from the main application state.
 pub struct CreateProjectState<'a> {
     pub name: &'a str,
-    pub description: &'a str,
+    pub description_content: &'a text_editor::Content,
     pub owner: &'a str,
     pub tags: &'a str,
     pub loading: bool,
@@ -87,14 +88,8 @@ fn view_form<'a>(state: &CreateProjectState<'a>, palette: &'a Palette) -> Elemen
         palette,
     );
 
-    let description_field = view_text_field(
-        "Description",
-        "Optional description",
-        state.description,
-        Message::CreateProjectDescriptionChanged,
-        !state.loading,
-        palette,
-    );
+    let description_field =
+        view_description_field(state.description_content, !state.loading, palette);
 
     let owner_field = view_text_field(
         "Owner",
@@ -196,6 +191,54 @@ where
     }
 
     column![label_text, Space::with_height(6), input]
+        .width(Length::Fill)
+        .into()
+}
+
+/// Renders the description field as a multiline text editor.
+fn view_description_field<'a>(
+    content: &'a text_editor::Content,
+    enabled: bool,
+    palette: &'a Palette,
+) -> Element<'a, Message> {
+    let label_text = text("Description").size(12).color(palette.text_secondary);
+
+    let accent = palette.accent;
+    let border_hover = palette.border_hover;
+    let border = palette.border;
+    let bg_input = palette.input;
+    let text_muted = palette.text_muted;
+    let text_primary = palette.text;
+
+    let mut editor = text_editor(content)
+        .placeholder("Optional description")
+        .padding(12)
+        .height(Length::Fixed(120.0))
+        .style(move |_: &Theme, status| {
+            let border_color = match status {
+                text_editor::Status::Focused => accent,
+                text_editor::Status::Hovered => border_hover,
+                _ => border,
+            };
+            text_editor::Style {
+                background: Background::Color(bg_input),
+                border: Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: Radius::from(appearance::CORNER_RADIUS),
+                },
+                icon: text_muted,
+                placeholder: text_muted,
+                value: text_primary,
+                selection: accent,
+            }
+        });
+
+    if enabled {
+        editor = editor.on_action(Message::CreateProjectDescriptionAction);
+    }
+
+    column![label_text, Space::with_height(6), editor]
         .width(Length::Fill)
         .into()
 }
