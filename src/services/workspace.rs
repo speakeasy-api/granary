@@ -234,19 +234,18 @@ impl Workspace {
         }
 
         // Fall back to registry: the path may be a root registered to a named workspace
-        if let Ok(registry) = WorkspaceRegistry::load() {
-            if let Some(workspace_name) = registry.lookup_root(&root) {
-                if let Ok(db_path) = WorkspaceRegistry::workspace_db_path(workspace_name) {
-                    let ws_dir = db_path.parent().unwrap().to_path_buf();
-                    return Ok(Self {
-                        name: Some(workspace_name.to_string()),
-                        root,
-                        granary_dir: ws_dir,
-                        db_path,
-                        mode: WorkspaceMode::Named(workspace_name.to_string()),
-                    });
-                }
-            }
+        if let Ok(registry) = WorkspaceRegistry::load()
+            && let Some(workspace_name) = registry.lookup_root(&root)
+            && let Ok(db_path) = WorkspaceRegistry::workspace_db_path(workspace_name)
+        {
+            let ws_dir = db_path.parent().unwrap().to_path_buf();
+            return Ok(Self {
+                name: Some(workspace_name.to_string()),
+                root,
+                granary_dir: ws_dir,
+                db_path,
+                mode: WorkspaceMode::Named(workspace_name.to_string()),
+            });
         }
 
         Err(GranaryError::WorkspaceNotFound(root.display().to_string()))

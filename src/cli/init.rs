@@ -218,16 +218,16 @@ pub async fn doctor(fix: bool, cli_format: Option<CliOutputFormat>) -> Result<()
 
     // Check global agent files
     for dir in &global_dirs {
-        if let Some(instruction_path) = get_global_instruction_file_path(dir) {
-            if instruction_path.exists() {
-                let (status, message) = check_and_maybe_fix(&instruction_path, fix);
-                agent_checks.push(AgentFileCheck {
-                    agent: format!("{} (global)", dir.agent_type.display_name()),
-                    path: instruction_path.display().to_string(),
-                    status,
-                    message,
-                });
-            }
+        if let Some(instruction_path) = get_global_instruction_file_path(dir)
+            && instruction_path.exists()
+        {
+            let (status, message) = check_and_maybe_fix(&instruction_path, fix);
+            agent_checks.push(AgentFileCheck {
+                agent: format!("{} (global)", dir.agent_type.display_name()),
+                path: instruction_path.display().to_string(),
+                status,
+                message,
+            });
         }
     }
 

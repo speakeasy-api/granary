@@ -201,7 +201,7 @@ pub fn get_by_path(key: Option<&str>) -> Result<serde_json::Value> {
 
     let key = match key {
         None => return Ok(value),
-        Some(k) if k.is_empty() => return Ok(value),
+        Some("") => return Ok(value),
         Some(k) => k,
     };
 
