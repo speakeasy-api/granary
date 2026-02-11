@@ -5,6 +5,8 @@
 
 use std::time::Duration;
 
+use serde::Serialize;
+
 use crate::cli::args::{CliOutputFormat, RunCommand};
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::daemon::{LogTarget, ensure_daemon};
@@ -66,6 +68,117 @@ impl Output for RunOutput {
 
     fn to_text(&self) -> String {
         table::format_run(&self.run)
+    }
+}
+
+/// Output for run stop
+pub struct RunStopOutput {
+    pub run: Run,
+}
+
+#[derive(Serialize)]
+struct RunStopJson {
+    stopped: bool,
+    run: serde_json::Value,
+}
+
+impl Output for RunStopOutput {
+    fn to_json(&self) -> String {
+        let run_val = serde_json::to_value(&self.run)
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        serde_json::to_string_pretty(&RunStopJson {
+            stopped: true,
+            run: run_val,
+        })
+        .unwrap_or_default()
+    }
+
+    fn to_prompt(&self) -> String {
+        let run_out = RunOutput {
+            run: self.run.clone(),
+        };
+        format!("Run stopped\n{}", run_out.to_prompt())
+    }
+
+    fn to_text(&self) -> String {
+        let run_out = RunOutput {
+            run: self.run.clone(),
+        };
+        format!("Run stopped.\n{}", run_out.to_text())
+    }
+}
+
+/// Output for run pause
+pub struct RunPauseOutput {
+    pub run: Run,
+}
+
+#[derive(Serialize)]
+struct RunPauseJson {
+    paused: bool,
+    run: serde_json::Value,
+}
+
+impl Output for RunPauseOutput {
+    fn to_json(&self) -> String {
+        let run_val = serde_json::to_value(&self.run)
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        serde_json::to_string_pretty(&RunPauseJson {
+            paused: true,
+            run: run_val,
+        })
+        .unwrap_or_default()
+    }
+
+    fn to_prompt(&self) -> String {
+        let run_out = RunOutput {
+            run: self.run.clone(),
+        };
+        format!("Run paused\n{}", run_out.to_prompt())
+    }
+
+    fn to_text(&self) -> String {
+        let run_out = RunOutput {
+            run: self.run.clone(),
+        };
+        format!("Run paused.\n{}", run_out.to_text())
+    }
+}
+
+/// Output for run resume
+pub struct RunResumeOutput {
+    pub run: Run,
+}
+
+#[derive(Serialize)]
+struct RunResumeJson {
+    resumed: bool,
+    run: serde_json::Value,
+}
+
+impl Output for RunResumeOutput {
+    fn to_json(&self) -> String {
+        let run_val = serde_json::to_value(&self.run)
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        serde_json::to_string_pretty(&RunResumeJson {
+            resumed: true,
+            run: run_val,
+        })
+        .unwrap_or_default()
+    }
+
+    fn to_prompt(&self) -> String {
+        let run_out = RunOutput {
+            run: self.run.clone(),
+        };
+        format!("Run resumed\n{}", run_out.to_prompt())
+    }
+
+    fn to_text(&self) -> String {
+        let run_out = RunOutput {
+            run: self.run.clone(),
+        };
+        format!("Run resumed.\n{}", run_out.to_text())
     }
 }
 
@@ -174,17 +287,31 @@ async fn fetch_and_format_runs(
 }
 
 /// Handle run subcommands
-pub async fn run(command: RunCommand, cli_format: Option<CliOutputFormat>) -> Result<()> {
+pub async fn run(
+    id: Option<String>,
+    command: Option<RunCommand>,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
+    let require_id = || -> Result<String> {
+        id.clone()
+            .ok_or_else(|| GranaryError::InvalidArgument("Run ID is required".to_string()))
+    };
+
     match command {
-        RunCommand::Status { run_id } => show_status(&run_id, cli_format).await,
-        RunCommand::Logs {
-            run_id,
-            follow,
-            lines,
-        } => show_logs(&run_id, follow, lines).await,
-        RunCommand::Stop { run_id } => stop_run(&run_id, cli_format).await,
-        RunCommand::Pause { run_id } => pause_run(&run_id, cli_format).await,
-        RunCommand::Resume { run_id } => resume_run(&run_id, cli_format).await,
+        Some(RunCommand::Status) => show_status(&require_id()?, cli_format).await,
+        Some(RunCommand::Logs { follow, lines }) => show_logs(&require_id()?, follow, lines).await,
+        Some(RunCommand::Stop) => stop_run(&require_id()?, cli_format).await,
+        Some(RunCommand::Pause) => pause_run(&require_id()?, cli_format).await,
+        Some(RunCommand::Resume) => resume_run(&require_id()?, cli_format).await,
+        None => {
+            // Default: show status when only ID is provided
+            let run_id = id.ok_or_else(|| {
+                GranaryError::InvalidArgument(
+                    "Run ID is required. Use 'granary run <id>'".to_string(),
+                )
+            })?;
+            show_status(&run_id, cli_format).await
+        }
     }
 }
 
@@ -328,10 +455,8 @@ async fn stop_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result<(
         || run_status == RunStatus::Failed
         || run_status == RunStatus::Cancelled
     {
-        println!(
-            "Run {} is already finished (status: {})",
-            run_id, run.status
-        );
+        let output = RunStopOutput { run };
+        println!("{}", output.format(cli_format));
         return Ok(());
     }
 
@@ -340,7 +465,6 @@ async fn stop_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result<(
         && (run_status == RunStatus::Running || run_status == RunStatus::Paused)
         && is_process_alive(pid as u32)
     {
-        println!("Sending SIGTERM to process {}...", pid);
         send_signal(pid as u32, Signal::Term);
 
         // Wait a bit for the process to exit
@@ -359,8 +483,7 @@ async fn stop_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result<(
     let run = db::runs::get(&global_pool, run_id)
         .await?
         .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
-    let output = RunOutput { run };
-    println!("Run stopped.");
+    let output = RunStopOutput { run };
     println!("{}", output.format(cli_format));
 
     Ok(())
@@ -385,7 +508,6 @@ async fn pause_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result<
     // Send SIGSTOP to process
     if let Some(pid) = run.pid {
         if is_process_alive(pid as u32) {
-            println!("Sending SIGSTOP to process {}...", pid);
             send_signal(pid as u32, Signal::Stop);
         } else {
             return Err(GranaryError::InvalidArgument(format!(
@@ -411,8 +533,7 @@ async fn pause_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result<
     let run = db::runs::get(&global_pool, run_id)
         .await?
         .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
-    let output = RunOutput { run };
-    println!("Run paused.");
+    let output = RunPauseOutput { run };
     println!("{}", output.format(cli_format));
 
     Ok(())
@@ -437,7 +558,6 @@ async fn resume_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result
     // Send SIGCONT to process
     if let Some(pid) = run.pid {
         if is_process_alive(pid as u32) {
-            println!("Sending SIGCONT to process {}...", pid);
             send_signal(pid as u32, Signal::Cont);
         } else {
             return Err(GranaryError::InvalidArgument(format!(
@@ -463,8 +583,7 @@ async fn resume_run(run_id: &str, cli_format: Option<CliOutputFormat>) -> Result
     let run = db::runs::get(&global_pool, run_id)
         .await?
         .ok_or_else(|| GranaryError::RunNotFound(run_id.to_string()))?;
-    let output = RunOutput { run };
-    println!("Run resumed.");
+    let output = RunResumeOutput { run };
     println!("{}", output.format(cli_format));
 
     Ok(())

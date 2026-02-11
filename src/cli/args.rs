@@ -398,9 +398,13 @@ pub enum Commands {
     },
 
     /// Manage a specific worker
+    #[command(subcommand_negates_reqs = true)]
     Worker {
+        /// Worker ID
+        id: Option<String>,
+
         #[command(subcommand)]
-        command: WorkerCommand,
+        command: Option<WorkerCommand>,
     },
 
     /// List all runs
@@ -423,9 +427,13 @@ pub enum Commands {
     },
 
     /// Manage a specific run
+    #[command(subcommand_negates_reqs = true)]
     Run {
+        /// Run ID
+        id: Option<String>,
+
         #[command(subcommand)]
-        command: RunCommand,
+        command: Option<RunCommand>,
     },
 
     /// List and manage events
@@ -945,10 +953,10 @@ pub enum CheckpointAction {
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
-    /// Get a config value
+    /// Get a global config value (dot-path access, e.g. "runners.my-runner.command")
     Get {
-        /// Config key
-        key: String,
+        /// Dot-path key (e.g. "runners", "runners.my-runner.command"). Omit for full config.
+        key: Option<String>,
     },
 
     /// Set a config value
@@ -1192,7 +1200,7 @@ pub enum WorkerCommand {
         on: Option<String>,
 
         /// Filter expressions (can be specified multiple times)
-        #[arg(long = "filter", short = 'f')]
+        #[arg(long = "filter")]
         filters: Vec<String>,
 
         /// Run in background as daemon
@@ -1209,18 +1217,12 @@ pub enum WorkerCommand {
     },
 
     /// Show worker status
-    Status {
-        /// Worker ID
-        worker_id: String,
-    },
+    Status,
 
     /// View worker logs
     Logs {
-        /// Worker ID
-        worker_id: String,
-
         /// Follow log output (like tail -f)
-        #[arg(long, short = 'f')]
+        #[arg(long)]
         follow: bool,
 
         /// Number of lines to show from the end
@@ -1230,9 +1232,6 @@ pub enum WorkerCommand {
 
     /// Stop a worker
     Stop {
-        /// Worker ID
-        worker_id: String,
-
         /// Also stop/cancel all active runs
         #[arg(long)]
         runs: bool,
@@ -1245,18 +1244,12 @@ pub enum WorkerCommand {
 #[derive(Subcommand)]
 pub enum RunCommand {
     /// Show run status and details
-    Status {
-        /// Run ID
-        run_id: String,
-    },
+    Status,
 
     /// View run logs
     Logs {
-        /// Run ID
-        run_id: String,
-
         /// Follow log output (like tail -f)
-        #[arg(long, short = 'f')]
+        #[arg(long)]
         follow: bool,
 
         /// Number of lines to show from the end
@@ -1265,22 +1258,13 @@ pub enum RunCommand {
     },
 
     /// Stop a running run
-    Stop {
-        /// Run ID
-        run_id: String,
-    },
+    Stop,
 
     /// Pause a running run (sends SIGSTOP)
-    Pause {
-        /// Run ID
-        run_id: String,
-    },
+    Pause,
 
     /// Resume a paused run (sends SIGCONT)
-    Resume {
-        /// Run ID
-        run_id: String,
-    },
+    Resume,
 }
 
 #[derive(Subcommand)]

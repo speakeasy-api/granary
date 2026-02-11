@@ -8,17 +8,168 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use serde::Serialize;
+
 use crate::cli::args::{CliOutputFormat, WorkerCommand};
 use crate::cli::workers::WorkerOutput;
 use crate::daemon::{LogTarget, StartWorkerRequest, ensure_daemon};
 use crate::error::{GranaryError, Result};
+use crate::models::Worker;
 use crate::output::Output;
 use crate::services::{Workspace, global_config_service};
 
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for worker status with run statistics
+pub struct WorkerStatusOutput {
+    pub worker: Worker,
+    pub running: usize,
+    pub pending: usize,
+    pub completed: usize,
+    pub failed: usize,
+}
+
+#[derive(Serialize)]
+struct WorkerStatusJson {
+    worker: serde_json::Value,
+    run_statistics: RunStatisticsJson,
+}
+
+#[derive(Serialize)]
+struct RunStatisticsJson {
+    running: usize,
+    pending: usize,
+    completed: usize,
+    failed: usize,
+}
+
+impl Output for WorkerStatusOutput {
+    fn to_json(&self) -> String {
+        let worker_val = serde_json::to_value(&self.worker)
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        serde_json::to_string_pretty(&WorkerStatusJson {
+            worker: worker_val,
+            run_statistics: RunStatisticsJson {
+                running: self.running,
+                pending: self.pending,
+                completed: self.completed,
+                failed: self.failed,
+            },
+        })
+        .unwrap_or_default()
+    }
+
+    fn to_prompt(&self) -> String {
+        let worker_out = WorkerOutput {
+            worker: self.worker.clone(),
+        };
+        format!(
+            "{}\nRun Statistics: running={}, pending={}, completed={}, failed={}",
+            worker_out.to_prompt(),
+            self.running,
+            self.pending,
+            self.completed,
+            self.failed,
+        )
+    }
+
+    fn to_text(&self) -> String {
+        let worker_out = WorkerOutput {
+            worker: self.worker.clone(),
+        };
+        format!(
+            "{}\nRun Statistics:\n  Running:   {}\n  Pending:   {}\n  Completed: {}\n  Failed:    {}",
+            worker_out.to_text(),
+            self.running,
+            self.pending,
+            self.completed,
+            self.failed,
+        )
+    }
+}
+
+/// Output for worker stop
+pub struct WorkerStopOutput {
+    pub worker: Worker,
+}
+
+#[derive(Serialize)]
+struct WorkerStopJson {
+    stopped: bool,
+    worker: serde_json::Value,
+}
+
+impl Output for WorkerStopOutput {
+    fn to_json(&self) -> String {
+        let worker_val = serde_json::to_value(&self.worker)
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        serde_json::to_string_pretty(&WorkerStopJson {
+            stopped: true,
+            worker: worker_val,
+        })
+        .unwrap_or_default()
+    }
+
+    fn to_prompt(&self) -> String {
+        let worker_out = WorkerOutput {
+            worker: self.worker.clone(),
+        };
+        format!("Worker stopped\n{}", worker_out.to_prompt())
+    }
+
+    fn to_text(&self) -> String {
+        let worker_out = WorkerOutput {
+            worker: self.worker.clone(),
+        };
+        format!("Worker stopped.\n{}", worker_out.to_text())
+    }
+}
+
+/// Output for worker prune
+pub struct WorkerPruneOutput {
+    pub pruned_count: i32,
+}
+
+#[derive(Serialize)]
+struct WorkerPruneJson {
+    pruned_count: i32,
+}
+
+impl Output for WorkerPruneOutput {
+    fn to_json(&self) -> String {
+        serde_json::to_string_pretty(&WorkerPruneJson {
+            pruned_count: self.pruned_count,
+        })
+        .unwrap_or_default()
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.pruned_count == 0 {
+            "No workers pruned".to_string()
+        } else {
+            format!("Pruned {} worker(s)", self.pruned_count)
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.pruned_count == 0 {
+            "No workers to prune.".to_string()
+        } else {
+            format!("Pruned {} worker(s).", self.pruned_count)
+        }
+    }
+}
+
 /// Handle worker commands
-pub async fn worker(command: WorkerCommand, cli_format: Option<CliOutputFormat>) -> Result<()> {
+pub async fn worker(
+    id: Option<String>,
+    command: Option<WorkerCommand>,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     match command {
-        WorkerCommand::Start {
+        Some(WorkerCommand::Start {
             runner,
             command,
             args,
@@ -27,7 +178,7 @@ pub async fn worker(command: WorkerCommand, cli_format: Option<CliOutputFormat>)
             detached,
             concurrency,
             poll_cooldown,
-        } => {
+        }) => {
             start_worker(StartWorkerArgs {
                 runner_name: runner,
                 inline_command: command,
@@ -41,14 +192,35 @@ pub async fn worker(command: WorkerCommand, cli_format: Option<CliOutputFormat>)
             })
             .await
         }
-        WorkerCommand::Status { worker_id } => show_status(&worker_id, cli_format).await,
-        WorkerCommand::Logs {
-            worker_id,
-            follow,
-            lines,
-        } => show_logs(&worker_id, follow, lines).await,
-        WorkerCommand::Stop { worker_id, runs } => stop_worker(&worker_id, runs, cli_format).await,
-        WorkerCommand::Prune => prune_workers().await,
+        Some(WorkerCommand::Prune) => prune_workers(cli_format).await,
+        Some(WorkerCommand::Status) => {
+            let worker_id = id.ok_or_else(|| {
+                GranaryError::InvalidArgument("Worker ID is required".to_string())
+            })?;
+            show_status(&worker_id, cli_format).await
+        }
+        Some(WorkerCommand::Logs { follow, lines }) => {
+            let worker_id = id.ok_or_else(|| {
+                GranaryError::InvalidArgument("Worker ID is required".to_string())
+            })?;
+            show_logs(&worker_id, follow, lines).await
+        }
+        Some(WorkerCommand::Stop { runs }) => {
+            let worker_id = id.ok_or_else(|| {
+                GranaryError::InvalidArgument("Worker ID is required".to_string())
+            })?;
+            stop_worker(&worker_id, runs, cli_format).await
+        }
+        None => {
+            // Default: show status when only ID is provided
+            let worker_id = id.ok_or_else(|| {
+                GranaryError::InvalidArgument(
+                    "Worker ID is required. Use 'granary worker <id>' or 'granary worker start'"
+                        .to_string(),
+                )
+            })?;
+            show_status(&worker_id, cli_format).await
+        }
     }
 }
 
@@ -211,23 +383,17 @@ async fn show_status(worker_id: &str, cli_format: Option<CliOutputFormat>) -> Re
     // Get worker from daemon
     let worker = client.get_worker(worker_id).await?;
 
-    let output = WorkerOutput { worker };
-    println!("{}", output.format(cli_format));
-
     // Get run statistics via daemon
     let runs = client.list_runs(Some(worker_id), None, true).await?;
 
-    let running_count = runs.iter().filter(|r| r.is_running()).count();
-    let pending_count = runs.iter().filter(|r| r.status == "pending").count();
-    let completed_count = runs.iter().filter(|r| r.status == "completed").count();
-    let failed_count = runs.iter().filter(|r| r.status == "failed").count();
-
-    println!();
-    println!("Run Statistics:");
-    println!("  Running:   {}", running_count);
-    println!("  Pending:   {}", pending_count);
-    println!("  Completed: {}", completed_count);
-    println!("  Failed:    {}", failed_count);
+    let output = WorkerStatusOutput {
+        worker,
+        running: runs.iter().filter(|r| r.is_running()).count(),
+        pending: runs.iter().filter(|r| r.status == "pending").count(),
+        completed: runs.iter().filter(|r| r.status == "completed").count(),
+        failed: runs.iter().filter(|r| r.status == "failed").count(),
+    };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }
@@ -408,26 +574,24 @@ async fn stop_worker(
     // Get updated worker status from daemon
     let worker = client.get_worker(worker_id).await?;
 
-    let output = WorkerOutput { worker };
-    println!("Worker stopped.");
+    let output = WorkerStopOutput { worker };
     println!("{}", output.format(cli_format));
 
     Ok(())
 }
 
 /// Prune stopped/errored workers via the daemon
-async fn prune_workers() -> Result<()> {
+async fn prune_workers(cli_format: Option<CliOutputFormat>) -> Result<()> {
     // Connect to daemon (auto-starts if needed)
     let mut client = ensure_daemon().await?;
 
     // Prune workers via daemon
     let pruned = client.prune_workers().await?;
 
-    if pruned == 0 {
-        println!("No workers to prune.");
-    } else {
-        println!("Pruned {} worker(s).", pruned);
-    }
+    let output = WorkerPruneOutput {
+        pruned_count: pruned,
+    };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }

@@ -345,7 +345,7 @@ pub async fn load_worker_logs(
     let lines_arg = lines.unwrap_or(50).to_string();
     let output = run_granary(
         &workspace,
-        &["worker", "logs", &worker_id, "-n", &lines_arg],
+        &["worker", &worker_id, "logs", "-n", &lines_arg],
     )
     .await?;
     Ok(output.lines().map(String::from).collect())
@@ -363,7 +363,7 @@ pub async fn load_run_logs(
     lines: Option<u32>,
 ) -> Result<Vec<String>, String> {
     let lines_arg = lines.unwrap_or(100).to_string();
-    let output = run_granary(&workspace, &["run", "logs", &run_id, "-n", &lines_arg]).await?;
+    let output = run_granary(&workspace, &["run", &run_id, "logs", "-n", &lines_arg]).await?;
     Ok(output.lines().map(String::from).collect())
 }
 
@@ -604,25 +604,25 @@ pub async fn load_runs(
 
 /// Get a specific run by ID
 pub async fn get_run(workspace: PathBuf, run_id: String) -> Result<Run, String> {
-    let output = run_granary(&workspace, &["run", "status", &run_id, "--json"]).await?;
-    parse_json_logged(&output, &format!("run status {} --json", run_id))
+    let output = run_granary(&workspace, &["run", &run_id, "status", "--json"]).await?;
+    parse_json_logged(&output, &format!("run {} status --json", run_id))
 }
 
 /// Stop a running run
 pub async fn stop_run(workspace: PathBuf, run_id: String) -> Result<(), String> {
-    run_granary(&workspace, &["run", "stop", &run_id]).await?;
+    run_granary(&workspace, &["run", &run_id, "stop"]).await?;
     Ok(())
 }
 
 /// Pause a running run
 pub async fn pause_run(workspace: PathBuf, run_id: String) -> Result<(), String> {
-    run_granary(&workspace, &["run", "pause", &run_id]).await?;
+    run_granary(&workspace, &["run", &run_id, "pause"]).await?;
     Ok(())
 }
 
 /// Resume a paused run
 pub async fn resume_run(workspace: PathBuf, run_id: String) -> Result<(), String> {
-    run_granary(&workspace, &["run", "resume", &run_id]).await?;
+    run_granary(&workspace, &["run", &run_id, "resume"]).await?;
     Ok(())
 }
 
@@ -864,7 +864,7 @@ pub async fn start_worker_inline(
 /// - `workspace`: Path to the granary workspace
 /// - `worker_id`: ID of the worker to stop
 pub async fn stop_worker(workspace: PathBuf, worker_id: String) -> Result<(), String> {
-    run_granary(&workspace, &["worker", "stop", &worker_id]).await?;
+    run_granary(&workspace, &["worker", &worker_id, "stop"]).await?;
     Ok(())
 }
 
@@ -874,8 +874,8 @@ pub async fn stop_worker(workspace: PathBuf, worker_id: String) -> Result<(), St
 /// - `workspace`: Path to the granary workspace
 /// - `worker_id`: ID of the worker to get status for
 pub async fn get_worker_status(workspace: PathBuf, worker_id: String) -> Result<Worker, String> {
-    let output = run_granary(&workspace, &["worker", "status", &worker_id, "--json"]).await?;
-    parse_json_logged(&output, &format!("worker status {} --json", worker_id))
+    let output = run_granary(&workspace, &["worker", &worker_id, "status", "--json"]).await?;
+    parse_json_logged(&output, &format!("worker {} status --json", worker_id))
 }
 
 // =============================================================================

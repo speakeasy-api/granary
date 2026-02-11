@@ -190,6 +190,49 @@ pub fn remove_runner(name: &str) -> Result<bool> {
     Ok(removed)
 }
 
+/// Load the global config as a serde_json::Value and resolve a dot-path into it.
+///
+/// If `key` is `None`, returns the entire config. Otherwise splits on '.'
+/// and traverses tables/maps to reach the requested subtree.
+pub fn get_by_path(key: Option<&str>) -> Result<serde_json::Value> {
+    let config = load()?;
+    let value = serde_json::to_value(&config)
+        .map_err(|e| GranaryError::GlobalConfig(format!("Failed to serialize config: {}", e)))?;
+
+    let key = match key {
+        None => return Ok(value),
+        Some(k) if k.is_empty() => return Ok(value),
+        Some(k) => k,
+    };
+
+    let segments: Vec<&str> = key.split('.').collect();
+    let mut current = &value;
+
+    for (i, segment) in segments.iter().enumerate() {
+        match current {
+            serde_json::Value::Object(map) => match map.get(*segment) {
+                Some(v) => current = v,
+                None => {
+                    let path_so_far = segments[..=i].join(".");
+                    return Err(GranaryError::GlobalConfig(format!(
+                        "Key not found: {}",
+                        path_so_far
+                    )));
+                }
+            },
+            _ => {
+                let path_so_far = segments[..i].join(".");
+                return Err(GranaryError::GlobalConfig(format!(
+                    "'{}' is not a table/section, cannot traverse further",
+                    path_so_far
+                )));
+            }
+        }
+    }
+
+    Ok(current.clone())
+}
+
 /// List all runner names
 pub fn list_runners() -> Result<Vec<String>> {
     let config = load()?;

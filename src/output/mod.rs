@@ -165,14 +165,42 @@ mod tests {
         }
     }
 
+    fn make_worker(id: &str) -> Worker {
+        Worker {
+            id: id.to_string(),
+            runner_name: None,
+            command: "echo".to_string(),
+            args: "[]".to_string(),
+            event_type: "task.created".to_string(),
+            filters: "[]".to_string(),
+            concurrency: 1,
+            instance_path: "/tmp/test".to_string(),
+            status: "running".to_string(),
+            error_message: None,
+            pid: Some(1234),
+            detached: false,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            stopped_at: None,
+            poll_cooldown_secs: 300,
+            last_event_id: 0,
+        }
+    }
+
     // =========================================================================
     // Output trait default type tests
     // =========================================================================
 
     mod default_output_types {
         use super::*;
+        use crate::cli::batch::{BatchOutput, BatchStreamOutput};
         use crate::cli::checkpoints::{CheckpointOutput, CheckpointsOutput};
         use crate::cli::comments::{CommentOutput, CommentsOutput};
+        use crate::cli::daemon::{
+            DaemonLogsOutput, DaemonRestartOutput, DaemonStartOutput, DaemonStatusOutput,
+            DaemonStopOutput,
+        };
+        use crate::cli::entrypoint::EntrypointOutput;
         use crate::cli::initiate::InitiateOutput;
         use crate::cli::initiatives::{
             InitiativeOutput as InitiativeShowOutput, InitiativeProjectsOutput,
@@ -181,14 +209,35 @@ mod tests {
         };
         use crate::cli::plan::{ExistingPlanOutput, PlanOutput};
         use crate::cli::projects::{ProjectOutput, ProjectTasksOutput, ProjectsOutput};
-        use crate::cli::run::{RunOutput, RunsOutput};
+        use crate::cli::run::{
+            RunOutput, RunPauseOutput, RunResumeOutput, RunStopOutput, RunsOutput,
+        };
         use crate::cli::search::SearchOutput;
         use crate::cli::sessions::{SessionOutput, SessionsOutput};
         use crate::cli::show::{ArtifactOutput, ArtifactsOutput};
         use crate::cli::summary::{ContextOutput, HandoffOutput, SummaryOutput};
         use crate::cli::tasks::{NextTaskOutput, TaskCreatedOutput, TaskOutput, TasksOutput};
+        use crate::cli::update::{UpdateCheckOutput, UpdateOutput};
         use crate::cli::work::{WorkBlockOutput, WorkDoneOutput, WorkOutput, WorkReleaseOutput};
+        use crate::cli::worker::{WorkerPruneOutput, WorkerStatusOutput, WorkerStopOutput};
         use crate::cli::workers::{WorkerOutput, WorkersOutput};
+
+        // Batch commands → Text (default)
+        #[test]
+        fn batch_output_defaults_to_text() {
+            assert_eq!(BatchOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn batch_stream_output_defaults_to_text() {
+            assert_eq!(BatchStreamOutput::output_type(), OutputType::Text);
+        }
+
+        // Entrypoint → Text (default)
+        #[test]
+        fn entrypoint_output_defaults_to_text() {
+            assert_eq!(EntrypointOutput::output_type(), OutputType::Text);
+        }
 
         // LLM-first commands → Prompt
         #[test]
@@ -372,6 +421,74 @@ mod tests {
         fn initiative_task_output_defaults_to_text() {
             assert_eq!(InitiativeTaskOutput::output_type(), OutputType::Text);
         }
+
+        #[test]
+        fn daemon_status_output_defaults_to_text() {
+            assert_eq!(DaemonStatusOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn daemon_start_output_defaults_to_text() {
+            assert_eq!(DaemonStartOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn daemon_stop_output_defaults_to_text() {
+            assert_eq!(DaemonStopOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn daemon_restart_output_defaults_to_text() {
+            assert_eq!(DaemonRestartOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn daemon_logs_output_defaults_to_text() {
+            assert_eq!(DaemonLogsOutput::output_type(), OutputType::Text);
+        }
+
+        // Worker action outputs → Text (default)
+        #[test]
+        fn worker_stop_output_defaults_to_text() {
+            assert_eq!(WorkerStopOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn worker_prune_output_defaults_to_text() {
+            assert_eq!(WorkerPruneOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn worker_status_output_defaults_to_text() {
+            assert_eq!(WorkerStatusOutput::output_type(), OutputType::Text);
+        }
+
+        // Run action outputs → Text (default)
+        #[test]
+        fn run_stop_output_defaults_to_text() {
+            assert_eq!(RunStopOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn run_pause_output_defaults_to_text() {
+            assert_eq!(RunPauseOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn run_resume_output_defaults_to_text() {
+            assert_eq!(RunResumeOutput::output_type(), OutputType::Text);
+        }
+
+        // Update outputs → Text (default)
+        #[test]
+        fn update_check_output_defaults_to_text() {
+            assert_eq!(UpdateCheckOutput::output_type(), OutputType::Text);
+        }
+
+        #[test]
+        fn update_output_defaults_to_text() {
+            assert_eq!(UpdateOutput::output_type(), OutputType::Text);
+        }
     }
 
     // =========================================================================
@@ -380,15 +497,126 @@ mod tests {
 
     mod json_validity {
         use super::*;
+        use crate::cli::batch::{BatchOutput, BatchStreamOutput};
         use crate::cli::checkpoints::{CheckpointOutput, CheckpointsOutput};
         use crate::cli::comments::{CommentOutput, CommentsOutput};
+        use crate::cli::daemon::{
+            DaemonLogsOutput, DaemonRestartOutput, DaemonStartOutput, DaemonStatusOutput,
+            DaemonStopOutput,
+        };
+        use crate::cli::entrypoint::{CommandHint, EntrypointOutput};
         use crate::cli::projects::{ProjectOutput, ProjectTasksOutput, ProjectsOutput};
-        use crate::cli::run::{RunOutput, RunsOutput};
+        use crate::cli::run::{
+            RunOutput, RunPauseOutput, RunResumeOutput, RunStopOutput, RunsOutput,
+        };
         use crate::cli::search::SearchOutput;
         use crate::cli::sessions::{SessionOutput, SessionsOutput};
         use crate::cli::show::{ArtifactOutput, ArtifactsOutput};
         use crate::cli::tasks::{NextTaskOutput, TaskCreatedOutput, TaskOutput, TasksOutput};
+        use crate::cli::update::{UpdateCheckOutput, UpdateOutput};
         use crate::cli::work::{WorkBlockOutput, WorkDoneOutput, WorkReleaseOutput};
+        use crate::cli::worker::{WorkerPruneOutput, WorkerStatusOutput, WorkerStopOutput};
+        use crate::services::batch_service::BatchResult;
+
+        fn make_batch_result(index: usize, op: &str, success: bool) -> BatchResult {
+            BatchResult {
+                index,
+                op: op.to_string(),
+                success,
+                id: if success {
+                    Some(format!("id-{}", index))
+                } else {
+                    None
+                },
+                error: if success {
+                    None
+                } else {
+                    Some("something went wrong".to_string())
+                },
+            }
+        }
+
+        #[test]
+        fn batch_output_json_empty() {
+            let output = BatchOutput {
+                results: vec![],
+                success_count: 0,
+                fail_count: 0,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+            assert_eq!(parsed.as_array().unwrap().len(), 0);
+        }
+
+        #[test]
+        fn batch_output_json_with_data() {
+            let output = BatchOutput {
+                results: vec![
+                    make_batch_result(0, "task.create", true),
+                    make_batch_result(1, "task.update", false),
+                ],
+                success_count: 1,
+                fail_count: 1,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+            assert_eq!(parsed.as_array().unwrap().len(), 2);
+        }
+
+        #[test]
+        fn batch_stream_output_json_empty() {
+            let output = BatchStreamOutput {
+                results: vec![],
+                success_count: 0,
+                fail_count: 0,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+            assert_eq!(parsed.as_array().unwrap().len(), 0);
+        }
+
+        #[test]
+        fn batch_stream_output_json_with_data() {
+            let output = BatchStreamOutput {
+                results: vec![make_batch_result(0, "project.create", true)],
+                success_count: 1,
+                fail_count: 0,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.is_array());
+            assert_eq!(parsed.as_array().unwrap().len(), 1);
+        }
+
+        #[test]
+        fn entrypoint_output_json_initialized() {
+            let output = EntrypointOutput {
+                initialized: true,
+                hints: vec![CommandHint {
+                    label: "Plan a feature".to_string(),
+                    command: "granary plan \"Feature name\"".to_string(),
+                }],
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["initialized"], true);
+            assert_eq!(parsed["hints"].as_array().unwrap().len(), 1);
+        }
+
+        #[test]
+        fn entrypoint_output_json_not_initialized() {
+            let output = EntrypointOutput {
+                initialized: false,
+                hints: vec![],
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["initialized"], false);
+            assert_eq!(parsed["hints"].as_array().unwrap().len(), 0);
+        }
 
         #[test]
         fn tasks_output_json_empty() {
@@ -611,6 +839,211 @@ mod tests {
             let json = output.to_json();
             let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed["status"], "released");
+        }
+
+        #[test]
+        fn daemon_status_output_json_running() {
+            let output = DaemonStatusOutput {
+                running: true,
+                pid: Some(1234),
+                version: Some("0.1.0".to_string()),
+                endpoint: Some("Socket: /tmp/granary.sock".to_string()),
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["running"], true);
+            assert_eq!(parsed["pid"], 1234);
+        }
+
+        #[test]
+        fn daemon_status_output_json_not_running() {
+            let output = DaemonStatusOutput {
+                running: false,
+                pid: None,
+                version: None,
+                endpoint: None,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["running"], false);
+        }
+
+        #[test]
+        fn daemon_start_output_json_valid() {
+            let output = DaemonStartOutput {
+                success: true,
+                version: Some("0.1.0".to_string()),
+                pid: Some(5678),
+                error: None,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["success"], true);
+        }
+
+        #[test]
+        fn daemon_stop_output_json_valid() {
+            let output = DaemonStopOutput {
+                stopped: true,
+                warning: None,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["stopped"], true);
+        }
+
+        #[test]
+        fn daemon_restart_output_json_valid() {
+            let output = DaemonRestartOutput {
+                stop: DaemonStopOutput {
+                    stopped: true,
+                    warning: None,
+                },
+                start: DaemonStartOutput {
+                    success: true,
+                    version: Some("0.1.0".to_string()),
+                    pid: Some(9999),
+                    error: None,
+                },
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["stop"]["stopped"], true);
+            assert_eq!(parsed["start"]["success"], true);
+        }
+
+        #[test]
+        fn daemon_logs_output_json_valid() {
+            let output = DaemonLogsOutput {
+                logs: "test log line".to_string(),
+                log_path: "/tmp/daemon.log".to_string(),
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed["logs"].as_str().unwrap().contains("test log line"));
+        }
+
+        #[test]
+        fn worker_stop_output_json_valid() {
+            let output = WorkerStopOutput {
+                worker: make_worker("worker-1"),
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["stopped"], true);
+            assert!(parsed["worker"].is_object());
+        }
+
+        #[test]
+        fn worker_prune_output_json_zero() {
+            let output = WorkerPruneOutput { pruned_count: 0 };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["pruned_count"], 0);
+        }
+
+        #[test]
+        fn worker_prune_output_json_with_data() {
+            let output = WorkerPruneOutput { pruned_count: 3 };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["pruned_count"], 3);
+        }
+
+        #[test]
+        fn worker_status_output_json_valid() {
+            let output = WorkerStatusOutput {
+                worker: make_worker("worker-1"),
+                running: 2,
+                pending: 1,
+                completed: 5,
+                failed: 0,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed["worker"].is_object());
+            assert_eq!(parsed["run_statistics"]["running"], 2);
+            assert_eq!(parsed["run_statistics"]["pending"], 1);
+            assert_eq!(parsed["run_statistics"]["completed"], 5);
+            assert_eq!(parsed["run_statistics"]["failed"], 0);
+        }
+
+        #[test]
+        fn run_stop_output_json_valid() {
+            let output = RunStopOutput {
+                run: make_run("run-1"),
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["stopped"], true);
+            assert!(parsed["run"].is_object());
+        }
+
+        #[test]
+        fn run_pause_output_json_valid() {
+            let output = RunPauseOutput {
+                run: make_run("run-1"),
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["paused"], true);
+            assert!(parsed["run"].is_object());
+        }
+
+        #[test]
+        fn run_resume_output_json_valid() {
+            let output = RunResumeOutput {
+                run: make_run("run-1"),
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["resumed"], true);
+            assert!(parsed["run"].is_object());
+        }
+
+        #[test]
+        fn update_check_output_json_has_update() {
+            let output = UpdateCheckOutput {
+                current_version: "0.1.0".to_string(),
+                latest_stable: "0.2.0".to_string(),
+                latest_prerelease: Some("0.3.0-pre.1".to_string()),
+                has_update: true,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["current_version"], "0.1.0");
+            assert_eq!(parsed["latest_stable"], "0.2.0");
+            assert_eq!(parsed["latest_prerelease"], "0.3.0-pre.1");
+            assert_eq!(parsed["has_update"], true);
+        }
+
+        #[test]
+        fn update_check_output_json_up_to_date() {
+            let output = UpdateCheckOutput {
+                current_version: "0.2.0".to_string(),
+                latest_stable: "0.2.0".to_string(),
+                latest_prerelease: None,
+                has_update: false,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["has_update"], false);
+            assert!(parsed["latest_prerelease"].is_null());
+        }
+
+        #[test]
+        fn update_output_json_success() {
+            let output = UpdateOutput {
+                from_version: "0.1.0".to_string(),
+                to_version: "0.2.0".to_string(),
+                success: true,
+                latest_prerelease: None,
+            };
+            let json = output.to_json();
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["from_version"], "0.1.0");
+            assert_eq!(parsed["to_version"], "0.2.0");
+            assert_eq!(parsed["success"], true);
         }
     }
 

@@ -30,7 +30,7 @@ async fn run(cli: Cli) -> granary::Result<()> {
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {
-            entrypoint::show_entry_point().await?;
+            entrypoint::show_entry_point(format_override).await?;
             return Ok(());
         }
     };
@@ -217,15 +217,15 @@ async fn run(cli: Cli) -> granary::Result<()> {
         }
 
         Commands::Update { check, to } => {
-            update::update(check, to).await?;
+            update::update(check, to, format_override).await?;
         }
 
         Commands::Workers { all } => {
             workers::list_workers(all, format_override, cli.watch, cli.interval).await?;
         }
 
-        Commands::Worker { command } => {
-            worker::worker(command, format_override).await?;
+        Commands::Worker { id, command } => {
+            worker::worker(id, command, format_override).await?;
         }
 
         Commands::Runs {
@@ -246,8 +246,8 @@ async fn run(cli: Cli) -> granary::Result<()> {
             .await?;
         }
 
-        Commands::Run { command } => {
-            run::run(command, format_override).await?;
+        Commands::Run { id, command } => {
+            run::run(id, command, format_override).await?;
         }
 
         Commands::Events {
@@ -275,7 +275,7 @@ async fn run(cli: Cli) -> granary::Result<()> {
         },
 
         Commands::Daemon { command } => {
-            daemon::daemon(command).await?;
+            daemon::daemon(command, format_override).await?;
         }
     }
 
