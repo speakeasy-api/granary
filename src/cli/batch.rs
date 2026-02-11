@@ -1,11 +1,150 @@
 use std::io::{self, BufRead, Read};
 
+use crate::cli::args::CliOutputFormat;
 use crate::error::Result;
-use crate::output::OutputFormat;
+use crate::output::Output;
+use crate::services::batch_service::BatchResult;
 use crate::services::{self, Workspace, batch_service::BatchRequest};
 
+/// Output for batch/apply commands
+pub struct BatchOutput {
+    pub results: Vec<BatchResult>,
+    pub success_count: usize,
+    pub fail_count: usize,
+}
+
+impl Output for BatchOutput {
+    fn to_json(&self) -> String {
+        serde_json::to_string_pretty(&self.results).unwrap()
+    }
+
+    fn to_prompt(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Batch complete: {} succeeded, {} failed out of {} operations.",
+            self.success_count,
+            self.fail_count,
+            self.results.len()
+        ));
+
+        if self.fail_count > 0 {
+            lines.push("Failures:".to_string());
+            for result in &self.results {
+                if !result.success {
+                    lines.push(format!(
+                        "- {} (index {}): {}",
+                        result.op,
+                        result.index,
+                        result.error.as_deref().unwrap_or("Unknown error")
+                    ));
+                }
+            }
+        }
+
+        if self.success_count > 0 {
+            lines.push("Successes:".to_string());
+            for result in &self.results {
+                if result.success {
+                    if let Some(id) = &result.id {
+                        lines.push(format!("- {} -> {}", result.op, id));
+                    } else {
+                        lines.push(format!("- {}", result.op));
+                    }
+                }
+            }
+        }
+
+        lines.join("\n")
+    }
+
+    fn to_text(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Batch complete: {} succeeded, {} failed",
+            self.success_count, self.fail_count
+        ));
+
+        for result in &self.results {
+            if result.success {
+                if let Some(id) = &result.id {
+                    lines.push(format!("  [OK] {} -> {}", result.op, id));
+                } else {
+                    lines.push(format!("  [OK] {}", result.op));
+                }
+            } else {
+                lines.push(format!(
+                    "  [ERR] {}: {}",
+                    result.op,
+                    result.error.as_deref().unwrap_or("Unknown error")
+                ));
+            }
+        }
+
+        lines.join("\n")
+    }
+}
+
+/// Output for batch (JSONL) command - only shows errors in text mode
+pub struct BatchStreamOutput {
+    pub results: Vec<BatchResult>,
+    pub success_count: usize,
+    pub fail_count: usize,
+}
+
+impl Output for BatchStreamOutput {
+    fn to_json(&self) -> String {
+        serde_json::to_string_pretty(&self.results).unwrap()
+    }
+
+    fn to_prompt(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Batch complete: {} succeeded, {} failed out of {} operations.",
+            self.success_count,
+            self.fail_count,
+            self.results.len()
+        ));
+
+        if self.fail_count > 0 {
+            lines.push("Failures:".to_string());
+            for result in &self.results {
+                if !result.success {
+                    lines.push(format!(
+                        "- {} (index {}): {}",
+                        result.op,
+                        result.index,
+                        result.error.as_deref().unwrap_or("Unknown error")
+                    ));
+                }
+            }
+        }
+
+        lines.join("\n")
+    }
+
+    fn to_text(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Batch complete: {} succeeded, {} failed",
+            self.success_count, self.fail_count
+        ));
+
+        for result in &self.results {
+            if !result.success {
+                lines.push(format!(
+                    "  [ERR] {}: {}",
+                    result.op,
+                    result.error.as_deref().unwrap_or("Unknown error")
+                ));
+            }
+        }
+
+        lines.join("\n")
+    }
+}
+
 /// Apply a batch of operations from JSON
-pub async fn apply(stdin: bool, format: OutputFormat) -> Result<()> {
+pub async fn apply(stdin: bool, format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -22,42 +161,21 @@ pub async fn apply(stdin: bool, format: OutputFormat) -> Result<()> {
     let request: BatchRequest = serde_json::from_str(&input)?;
     let results = services::apply_batch(&pool, &request).await?;
 
-    match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&results)?);
-        }
-        _ => {
-            let success_count = results.iter().filter(|r| r.success).count();
-            let fail_count = results.len() - success_count;
+    let success_count = results.iter().filter(|r| r.success).count();
+    let fail_count = results.len() - success_count;
 
-            println!(
-                "Batch complete: {} succeeded, {} failed",
-                success_count, fail_count
-            );
-
-            for result in &results {
-                if result.success {
-                    if let Some(id) = &result.id {
-                        println!("  [OK] {} -> {}", result.op, id);
-                    } else {
-                        println!("  [OK] {}", result.op);
-                    }
-                } else {
-                    println!(
-                        "  [ERR] {}: {}",
-                        result.op,
-                        result.error.as_deref().unwrap_or("Unknown error")
-                    );
-                }
-            }
-        }
-    }
+    let output = BatchOutput {
+        results,
+        success_count,
+        fail_count,
+    };
+    println!("{}", output.format(format));
 
     Ok(())
 }
 
 /// Process a batch of operations from JSONL (one JSON object per line)
-pub async fn batch(stdin: bool, format: OutputFormat) -> Result<()> {
+pub async fn batch(stdin: bool, format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -83,30 +201,15 @@ pub async fn batch(stdin: bool, format: OutputFormat) -> Result<()> {
         all_results.extend(results);
     }
 
-    match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&all_results)?);
-        }
-        _ => {
-            let success_count = all_results.iter().filter(|r| r.success).count();
-            let fail_count = all_results.len() - success_count;
+    let success_count = all_results.iter().filter(|r| r.success).count();
+    let fail_count = all_results.len() - success_count;
 
-            println!(
-                "Batch complete: {} succeeded, {} failed",
-                success_count, fail_count
-            );
-
-            for result in &all_results {
-                if !result.success {
-                    println!(
-                        "  [ERR] {}: {}",
-                        result.op,
-                        result.error.as_deref().unwrap_or("Unknown error")
-                    );
-                }
-            }
-        }
-    }
+    let output = BatchStreamOutput {
+        results: all_results,
+        success_count,
+        fail_count,
+    };
+    println!("{}", output.format(format));
 
     Ok(())
 }

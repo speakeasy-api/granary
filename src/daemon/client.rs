@@ -19,8 +19,8 @@ use crate::daemon::protocol::{
     StartWorkerRequest, read_frame, write_frame,
 };
 use crate::error::{GranaryError, Result};
+use crate::models::Worker;
 use crate::models::run::Run;
-use crate::models::worker::Worker;
 use crate::services::global_config as global_config_service;
 
 /// Client for communicating with the granary daemon.
@@ -834,7 +834,6 @@ mod tests {
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-01T00:00:00Z",
             "stopped_at": null,
-            "poll_cooldown_secs": 300,
             "last_event_id": 0
         });
 
@@ -842,7 +841,6 @@ mod tests {
         assert_eq!(worker.id, "worker-12345678");
         assert_eq!(worker.command, "claude");
         assert!(worker.is_running());
-        assert_eq!(worker.poll_cooldown_secs, 300);
     }
 
     #[test]
@@ -886,7 +884,6 @@ mod tests {
             concurrency: 2,
             instance_path: "/home/user/project".to_string(),
             attach: true,
-            poll_cooldown_secs: Some(600),
         };
 
         let json = serde_json::to_string(&req).unwrap();
@@ -895,6 +892,5 @@ mod tests {
         assert_eq!(parsed.command, "claude");
         assert_eq!(parsed.concurrency, 2);
         assert!(parsed.attach);
-        assert_eq!(parsed.poll_cooldown_secs, Some(600));
     }
 }

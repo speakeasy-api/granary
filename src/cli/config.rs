@@ -1,54 +1,177 @@
-use crate::cli::args::{ConfigAction, RunnersAction, SteeringAction};
+use crate::cli::args::{CliOutputFormat, ConfigAction, RunnersAction, SteeringAction};
 use crate::db;
 use crate::error::Result;
-use crate::models::global_config::RunnerConfig;
-use crate::output::OutputFormat;
+use crate::models::RunnerConfig;
+use crate::output::Output;
 use crate::services::{Workspace, global_config_service};
 use std::collections::HashMap;
 
+/// Output for `config get` - wraps a resolved config subtree
+pub struct ConfigGetOutput {
+    pub value: serde_json::Value,
+    pub key: Option<String>,
+}
+
+impl Output for ConfigGetOutput {
+    fn to_json(&self) -> String {
+        serde_json::to_string_pretty(&self.value).unwrap_or_else(|_| "null".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        match &self.key {
+            Some(k) => format!("Config `{}`:\n{}", k, self.format_value_text(&self.value)),
+            None => format!("Global config:\n{}", self.format_value_text(&self.value)),
+        }
+    }
+
+    fn to_text(&self) -> String {
+        self.format_value_text(&self.value)
+    }
+}
+
+impl ConfigGetOutput {
+    fn format_value_text(&self, value: &serde_json::Value) -> String {
+        match value {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            serde_json::Value::Null => "(not set)".to_string(),
+            // For objects/arrays, use pretty TOML-like display via JSON pretty-print
+            _ => serde_json::to_string_pretty(value).unwrap_or_else(|_| format!("{}", value)),
+        }
+    }
+}
+
+/// Output for `config set` - confirmation message
+pub struct ConfigSetOutput {
+    pub key: String,
+    pub value: String,
+}
+
+impl Output for ConfigSetOutput {
+    fn to_json(&self) -> String {
+        serde_json::json!({"status": "set", "key": &self.key, "value": &self.value}).to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        format!("Set `{}` = `{}`", self.key, self.value)
+    }
+
+    fn to_text(&self) -> String {
+        format!("Set {} = {}", self.key, self.value)
+    }
+}
+
+/// Output for `config delete` - confirmation message
+pub struct ConfigDeleteOutput {
+    pub key: String,
+    pub deleted: bool,
+}
+
+impl Output for ConfigDeleteOutput {
+    fn to_json(&self) -> String {
+        serde_json::json!({"status": if self.deleted { "deleted" } else { "not_found" }, "key": &self.key}).to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.deleted {
+            format!("Deleted `{}`", self.key)
+        } else {
+            format!("Key not found: `{}`", self.key)
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.deleted {
+            format!("Deleted {}", self.key)
+        } else {
+            format!("Key not found: {}", self.key)
+        }
+    }
+}
+
+/// Output for `config list` - workspace key-value pairs
+pub struct ConfigListOutput {
+    pub items: Vec<(String, String)>,
+}
+
+impl Output for ConfigListOutput {
+    fn to_json(&self) -> String {
+        let entries: Vec<serde_json::Value> = self
+            .items
+            .iter()
+            .map(|(k, v)| serde_json::json!({"key": k, "value": v}))
+            .collect();
+        serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.items.is_empty() {
+            "No config values set.".to_string()
+        } else {
+            self.items
+                .iter()
+                .map(|(k, v)| format!("- `{}` = `{}`", k, v))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.items.is_empty() {
+            "No config values set".to_string()
+        } else {
+            self.items
+                .iter()
+                .map(|(k, v)| format!("{} = {}", k, v))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+}
+
 /// Handle config subcommands
-pub async fn config(action: ConfigAction, _format: OutputFormat) -> Result<()> {
+pub async fn config(action: ConfigAction, format: Option<CliOutputFormat>) -> Result<()> {
     match action {
-        // Workspace-level config commands need workspace
+        // Global config get with dot-path access
         ConfigAction::Get { key } => {
-            let workspace = Workspace::find()?;
-            let pool = workspace.pool().await?;
-            let value = db::config::get(&pool, &key).await?;
-            match value {
-                Some(v) => println!("{}", v),
-                None => println!("(not set)"),
-            }
+            let value = global_config_service::get_by_path(key.as_deref())?;
+            let output = ConfigGetOutput {
+                value,
+                key: key.clone(),
+            };
+            println!("{}", output.format(format));
         }
 
+        // Workspace-level config commands
         ConfigAction::Set { key, value } => {
             let workspace = Workspace::find()?;
             let pool = workspace.pool().await?;
             db::config::set(&pool, &key, &value).await?;
-            println!("Set {} = {}", key, value);
+            let output = ConfigSetOutput {
+                key: key.clone(),
+                value: value.clone(),
+            };
+            println!("{}", output.format(format));
         }
 
         ConfigAction::List => {
             let workspace = Workspace::find()?;
             let pool = workspace.pool().await?;
             let items = db::config::list(&pool).await?;
-            if items.is_empty() {
-                println!("No config values set");
-            } else {
-                for (key, value) in items {
-                    println!("{} = {}", key, value);
-                }
-            }
+            let output = ConfigListOutput { items };
+            println!("{}", output.format(format));
         }
 
         ConfigAction::Delete { key } => {
             let workspace = Workspace::find()?;
             let pool = workspace.pool().await?;
             let deleted = db::config::delete(&pool, &key).await?;
-            if deleted {
-                println!("Deleted {}", key);
-            } else {
-                println!("Key not found: {}", key);
-            }
+            let output = ConfigDeleteOutput {
+                key: key.clone(),
+                deleted,
+            };
+            println!("{}", output.format(format));
         }
 
         // Global config commands (don't need workspace)
@@ -60,46 +183,160 @@ pub async fn config(action: ConfigAction, _format: OutputFormat) -> Result<()> {
         }
 
         ConfigAction::Runners { action } => {
-            handle_runners_action(action).await?;
+            handle_runners_action(action, format).await?;
         }
     }
 
     Ok(())
 }
 
+/// Output for `config runners` (list) - all configured runners
+pub struct RunnersListOutput {
+    pub runners: HashMap<String, RunnerConfig>,
+}
+
+impl Output for RunnersListOutput {
+    fn to_json(&self) -> String {
+        serde_json::to_string(&self.runners).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.runners.is_empty() {
+            "No runners configured.".to_string()
+        } else {
+            self.runners
+                .iter()
+                .map(|(name, runner)| {
+                    format!(
+                        "- `{}` -> `{} {}`",
+                        name,
+                        runner.command,
+                        runner.args.join(" ")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.runners.is_empty() {
+            "No runners configured.\n\nAdd a runner with:\n  granary config runners add <name> --command <cmd>".to_string()
+        } else {
+            let mut lines = vec!["Configured runners:\n".to_string()];
+            for (name, runner) in &self.runners {
+                lines.push(format!(
+                    "  {} -> {} {}",
+                    name,
+                    runner.command,
+                    runner.args.join(" ")
+                ));
+                if let Some(c) = runner.concurrency {
+                    lines.push(format!("    concurrency: {}", c));
+                }
+                if let Some(ref on) = runner.on {
+                    lines.push(format!("    on: {}", on));
+                }
+                if !runner.env.is_empty() {
+                    lines.push(format!(
+                        "    env: {}",
+                        runner
+                            .env
+                            .iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
+            lines.join("\n")
+        }
+    }
+}
+
+/// Output for `config runners show` - single runner details
+pub struct RunnerShowOutput {
+    pub name: String,
+    pub runner: RunnerConfig,
+}
+
+impl Output for RunnerShowOutput {
+    fn to_json(&self) -> String {
+        serde_json::json!({"name": &self.name, "runner": &self.runner}).to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        format!(
+            "Runner `{}`:\n- command: `{}`",
+            self.name, self.runner.command
+        )
+    }
+
+    fn to_text(&self) -> String {
+        let mut lines = vec![
+            format!("Runner: {}\n", self.name),
+            format!("  command: {}", self.runner.command),
+        ];
+        if !self.runner.args.is_empty() {
+            lines.push(format!("  args: {:?}", self.runner.args));
+        }
+        if let Some(c) = self.runner.concurrency {
+            lines.push(format!("  concurrency: {}", c));
+        }
+        if let Some(ref on) = self.runner.on {
+            lines.push(format!("  on: {}", on));
+        }
+        if !self.runner.env.is_empty() {
+            lines.push("  env:".to_string());
+            for (k, v) in &self.runner.env {
+                lines.push(format!("    {}={}", k, v));
+            }
+        }
+        lines.join("\n")
+    }
+}
+
+/// Output for `config runners rm` - removal confirmation
+pub struct RunnerRmOutput {
+    pub name: String,
+    pub removed: bool,
+}
+
+impl Output for RunnerRmOutput {
+    fn to_json(&self) -> String {
+        serde_json::json!({"status": if self.removed { "removed" } else { "not_found" }, "name": &self.name}).to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.removed {
+            format!("Removed runner `{}`", self.name)
+        } else {
+            format!("Runner not found: `{}`", self.name)
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.removed {
+            format!("Removed runner: {}", self.name)
+        } else {
+            format!("Runner not found: {}", self.name)
+        }
+    }
+}
+
 /// Handle runners subcommands
-async fn handle_runners_action(action: Option<RunnersAction>) -> Result<()> {
+async fn handle_runners_action(
+    action: Option<RunnersAction>,
+    format: Option<CliOutputFormat>,
+) -> Result<()> {
     match action {
         None => {
             // List all runners
             let config = global_config_service::load()?;
-            if config.runners.is_empty() {
-                println!("No runners configured.");
-                println!("\nAdd a runner with:");
-                println!("  granary config runners add <name> --command <cmd>");
-            } else {
-                println!("Configured runners:\n");
-                for (name, runner) in &config.runners {
-                    println!("  {} -> {} {}", name, runner.command, runner.args.join(" "));
-                    if let Some(c) = runner.concurrency {
-                        println!("    concurrency: {}", c);
-                    }
-                    if let Some(ref on) = runner.on {
-                        println!("    on: {}", on);
-                    }
-                    if !runner.env.is_empty() {
-                        println!(
-                            "    env: {}",
-                            runner
-                                .env
-                                .iter()
-                                .map(|(k, v)| format!("{}={}", k, v))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        );
-                    }
-                }
-            }
+            let output = RunnersListOutput {
+                runners: config.runners,
+            };
+            println!("{}", output.format(format));
         }
 
         Some(RunnersAction::Add {
@@ -160,33 +397,23 @@ async fn handle_runners_action(action: Option<RunnersAction>) -> Result<()> {
 
         Some(RunnersAction::Rm { name }) => {
             let removed = global_config_service::remove_runner(&name)?;
-            if removed {
-                println!("Removed runner: {}", name);
-            } else {
-                println!("Runner not found: {}", name);
+            let output = RunnerRmOutput {
+                name: name.clone(),
+                removed,
+            };
+            println!("{}", output.format(format));
+            if !removed {
                 std::process::exit(3);
             }
         }
 
         Some(RunnersAction::Show { name }) => match global_config_service::get_runner(&name)? {
             Some(runner) => {
-                println!("Runner: {}\n", name);
-                println!("  command: {}", runner.command);
-                if !runner.args.is_empty() {
-                    println!("  args: {:?}", runner.args);
-                }
-                if let Some(c) = runner.concurrency {
-                    println!("  concurrency: {}", c);
-                }
-                if let Some(ref on) = runner.on {
-                    println!("  on: {}", on);
-                }
-                if !runner.env.is_empty() {
-                    println!("  env:");
-                    for (k, v) in &runner.env {
-                        println!("    {}={}", k, v);
-                    }
-                }
+                let output = RunnerShowOutput {
+                    name: name.clone(),
+                    runner,
+                };
+                println!("{}", output.format(format));
             }
             None => {
                 println!("Runner not found: {}", name);
@@ -212,23 +439,106 @@ fn parse_env_vars(env_vars: &[String]) -> HashMap<String, String> {
         .collect()
 }
 
+/// Output for `steering list` - all steering files
+pub struct SteeringListOutput {
+    pub files: Vec<db::steering::SteeringFile>,
+}
+
+impl Output for SteeringListOutput {
+    fn to_json(&self) -> String {
+        serde_json::to_string(&self.files).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.files.is_empty() {
+            "No steering files configured.".to_string()
+        } else {
+            self.files
+                .iter()
+                .map(|f| format!("- `{}` [{}]", f.path, f.scope_display()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.files.is_empty() {
+            "No steering files configured".to_string()
+        } else {
+            let mut lines = vec!["Steering files:".to_string()];
+            for file in &self.files {
+                lines.push(format!("  {} [{}]", file.path, file.scope_display()));
+            }
+            lines.join("\n")
+        }
+    }
+}
+
+/// Output for `steering add` - confirmation
+pub struct SteeringAddOutput {
+    pub path: String,
+    pub scope_display: String,
+}
+
+impl Output for SteeringAddOutput {
+    fn to_json(&self) -> String {
+        serde_json::json!({"status": "added", "path": &self.path, "scope": &self.scope_display})
+            .to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        format!(
+            "Added steering file: `{}` [{}]",
+            self.path, self.scope_display
+        )
+    }
+
+    fn to_text(&self) -> String {
+        format!(
+            "Added steering file: {} [{}]",
+            self.path, self.scope_display
+        )
+    }
+}
+
+/// Output for `steering rm` - removal confirmation
+pub struct SteeringRmOutput {
+    pub path: String,
+    pub removed: bool,
+}
+
+impl Output for SteeringRmOutput {
+    fn to_json(&self) -> String {
+        serde_json::json!({"status": if self.removed { "removed" } else { "not_found" }, "path": &self.path}).to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.removed {
+            format!("Removed steering file: `{}`", self.path)
+        } else {
+            format!("Steering file not found: `{}`", self.path)
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.removed {
+            format!("Removed steering file: {}", self.path)
+        } else {
+            format!("Steering file not found: {}", self.path)
+        }
+    }
+}
+
 /// Handle steering subcommands
-pub async fn steering(action: SteeringAction, _format: OutputFormat) -> Result<()> {
+pub async fn steering(action: SteeringAction, format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
     match action {
         SteeringAction::List => {
             let files = db::steering::list(&pool).await?;
-
-            if files.is_empty() {
-                println!("No steering files configured");
-            } else {
-                println!("Steering files:");
-                for file in files {
-                    println!("  {} [{}]", file.path, file.scope_display());
-                }
-            }
+            let output = SteeringListOutput { files };
+            println!("{}", output.format(format));
         }
 
         SteeringAction::Add {
@@ -261,7 +571,11 @@ pub async fn steering(action: SteeringAction, _format: OutputFormat) -> Result<(
                 (Some(t), Some(id)) => format!("{}: {}", t, id),
                 _ => "unknown".to_string(),
             };
-            println!("Added steering file: {} [{}]", path, scope_display);
+            let output = SteeringAddOutput {
+                path: path.clone(),
+                scope_display,
+            };
+            println!("{}", output.format(format));
         }
 
         SteeringAction::Rm {
@@ -289,16 +603,11 @@ pub async fn steering(action: SteeringAction, _format: OutputFormat) -> Result<(
             let removed =
                 db::steering::remove(&pool, &path, scope_type, scope_id.as_deref()).await?;
 
-            if removed {
-                let scope_display = match (scope_type, &scope_id) {
-                    (None, _) => "global".to_string(),
-                    (Some(t), Some(id)) => format!("{}: {}", t, id),
-                    _ => "unknown".to_string(),
-                };
-                println!("Removed steering file: {} [{}]", path, scope_display);
-            } else {
-                println!("Steering file not found: {}", path);
-            }
+            let output = SteeringRmOutput {
+                path: path.clone(),
+                removed,
+            };
+            println!("{}", output.format(format));
         }
     }
 

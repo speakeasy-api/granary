@@ -1,11 +1,54 @@
+use crate::cli::args::CliOutputFormat;
 use crate::db;
 use crate::error::{GranaryError, Result};
 use crate::models::*;
-use crate::output::{Formatter, OutputFormat};
+use crate::output::{Output, json, prompt, table};
 use crate::services::Workspace;
 
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for a single comment
+pub struct CommentOutput {
+    pub comment: Comment,
+}
+
+impl Output for CommentOutput {
+    fn to_json(&self) -> String {
+        json::format_comment(&self.comment)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_comment(&self.comment)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_comment(&self.comment)
+    }
+}
+
+/// Output for a list of comments
+pub struct CommentsOutput {
+    pub comments: Vec<Comment>,
+}
+
+impl Output for CommentsOutput {
+    fn to_json(&self) -> String {
+        json::format_comments(&self.comments)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_comments(&self.comments)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_comments(&self.comments)
+    }
+}
+
 /// Show a comment by ID
-pub async fn show_comment(id: &str, format: OutputFormat) -> Result<()> {
+pub async fn show_comment(id: &str, cli_format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -13,8 +56,8 @@ pub async fn show_comment(id: &str, format: OutputFormat) -> Result<()> {
         .await?
         .ok_or_else(|| GranaryError::CommentNotFound(id.to_string()))?;
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_comment(&comment));
+    let output = CommentOutput { comment };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }
@@ -24,7 +67,7 @@ pub async fn update_comment(
     id: &str,
     content: Option<String>,
     kind: Option<String>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
@@ -54,8 +97,10 @@ pub async fn update_comment(
         .await?
         .ok_or_else(|| GranaryError::CommentNotFound(id.to_string()))?;
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_comment(&updated_comment));
+    let output = CommentOutput {
+        comment: updated_comment,
+    };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }

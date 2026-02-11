@@ -20,7 +20,7 @@ use crate::daemon::protocol::{LogTarget, LogsResponse};
 use crate::db;
 use crate::error::{GranaryError, Result};
 use crate::models::run::{Run, RunStatus, UpdateRunStatus};
-use crate::models::worker::{CreateWorker, UpdateWorkerStatus, Worker, WorkerStatus};
+use crate::models::{CreateWorker, UpdateWorkerStatus, Worker, WorkerStatus};
 use crate::services::Workspace;
 use crate::services::global_config as global_config_service;
 use crate::services::worker_runtime::{WorkerRuntime, WorkerRuntimeConfig};
@@ -115,7 +115,8 @@ impl WorkerManager {
             workspace_pool,
             shutdown_rx,
             config,
-        )?;
+        )
+        .await?;
 
         // 4. Spawn as tokio task
         let worker_id = worker.id.clone();
@@ -386,7 +387,8 @@ impl WorkerManager {
             workspace_pool,
             shutdown_rx,
             config,
-        )?;
+        )
+        .await?;
 
         // Spawn as tokio task
         let worker_id = worker.id.clone();
@@ -838,10 +840,7 @@ impl WorkerManager {
     ///
     /// Returns an error if the logs directory cannot be read. Individual file
     /// deletion failures are silently ignored to ensure cleanup continues.
-    pub fn cleanup_old_logs(
-        &self,
-        config: &crate::models::global_config::LogRetentionConfig,
-    ) -> Result<u64> {
+    pub fn cleanup_old_logs(&self, config: &crate::models::LogRetentionConfig) -> Result<u64> {
         let logs_base_dir = global_config_service::logs_dir()?;
 
         // If logs directory doesn't exist, nothing to clean

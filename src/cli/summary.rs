@@ -1,25 +1,101 @@
 use std::time::Duration;
 
+use crate::cli::args::CliOutputFormat;
 use crate::cli::watch::watch_loop;
 use crate::error::Result;
-use crate::output::{OutputFormat, json, prompt};
+use crate::output::{Output, OutputType, json, prompt};
 use crate::services::{self, Workspace};
+
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for the summary command
+pub struct SummaryOutput {
+    pub summary: json::SummaryOutput,
+}
+
+impl Output for SummaryOutput {
+    fn to_json(&self) -> String {
+        json::format_summary(&self.summary)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_summary(&self.summary)
+    }
+
+    fn to_text(&self) -> String {
+        format_summary_table(&self.summary)
+    }
+}
+
+/// Output for the context command
+pub struct ContextOutput {
+    pub context: json::ContextOutput,
+}
+
+impl Output for ContextOutput {
+    fn output_type() -> OutputType {
+        OutputType::Prompt
+    }
+
+    fn to_json(&self) -> String {
+        json::format_context(&self.context)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_context(&self.context)
+    }
+
+    fn to_text(&self) -> String {
+        // Default to prompt format for context (LLM-optimized)
+        prompt::format_context(&self.context)
+    }
+}
+
+/// Output for the handoff command
+pub struct HandoffOutput {
+    pub handoff: json::HandoffOutput,
+}
+
+impl Output for HandoffOutput {
+    fn output_type() -> OutputType {
+        OutputType::Prompt
+    }
+
+    fn to_json(&self) -> String {
+        json::format_handoff(&self.handoff)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_handoff(&self.handoff)
+    }
+
+    fn to_text(&self) -> String {
+        // Default to prompt format for handoff (LLM-optimized)
+        prompt::format_handoff(&self.handoff)
+    }
+}
+
+// =============================================================================
+// Commands
+// =============================================================================
 
 /// Generate summary
 pub async fn summary(
     token_budget: Option<usize>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
     watch: bool,
     interval: u64,
 ) -> Result<()> {
     if watch {
         let interval_duration = Duration::from_secs(interval);
         watch_loop(interval_duration, || async {
-            render_summary(token_budget, format).await
+            render_summary(token_budget, cli_format).await
         })
         .await?;
     } else {
-        let output = render_summary(token_budget, format).await?;
+        let output = render_summary(token_budget, cli_format).await?;
         print!("{}", output);
     }
 
@@ -27,19 +103,16 @@ pub async fn summary(
 }
 
 /// Render summary output as a string (for both regular and watch mode)
-async fn render_summary(token_budget: Option<usize>, format: OutputFormat) -> Result<String> {
+async fn render_summary(
+    token_budget: Option<usize>,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<String> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
     let summary = services::generate_summary(&pool, &workspace, token_budget).await?;
-
-    let output = match format {
-        OutputFormat::Json => json::format_summary(&summary),
-        OutputFormat::Prompt => prompt::format_summary(&summary),
-        _ => format_summary_table(&summary),
-    };
-
-    Ok(output)
+    let output = SummaryOutput { summary };
+    Ok(output.format(cli_format))
 }
 
 /// Format summary as a table string
@@ -133,7 +206,7 @@ fn format_summary_table(summary: &json::SummaryOutput) -> String {
 pub async fn context(
     include: Option<String>,
     max_items: Option<usize>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
@@ -141,19 +214,8 @@ pub async fn context(
     let include_vec = include.map(|s| s.split(',').map(|s| s.trim().to_string()).collect());
 
     let context = services::generate_context(&pool, &workspace, include_vec, max_items).await?;
-
-    match format {
-        OutputFormat::Json => {
-            println!("{}", json::format_context(&context));
-        }
-        OutputFormat::Prompt => {
-            println!("{}", prompt::format_context(&context));
-        }
-        _ => {
-            // Default to prompt format for context
-            println!("{}", prompt::format_context(&context));
-        }
-    }
+    let output = ContextOutput { context };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }
@@ -164,7 +226,7 @@ pub async fn handoff(
     tasks: &str,
     constraints: Option<String>,
     acceptance_criteria: Option<String>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
@@ -181,17 +243,8 @@ pub async fn handoff(
     )
     .await?;
 
-    match format {
-        OutputFormat::Json => {
-            println!("{}", json::format_handoff(&handoff));
-        }
-        OutputFormat::Prompt => {
-            println!("{}", prompt::format_handoff(&handoff));
-        }
-        _ => {
-            println!("{}", prompt::format_handoff(&handoff));
-        }
-    }
+    let output = HandoffOutput { handoff };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }

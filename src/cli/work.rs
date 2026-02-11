@@ -4,26 +4,157 @@
 //! Agents use this command to claim a task, get complete context,
 //! and then signal completion or blockers.
 
-use crate::cli::args::WorkCommand;
+use granary_types::{Project, Task};
+use serde::Serialize;
+
+use crate::cli::args::{CliOutputFormat, WorkCommand};
 use crate::db;
 use crate::error::{GranaryError, Result};
 use crate::output::json::SteeringInfo;
+use crate::output::{Output, OutputType};
 use crate::services::{self, Workspace};
 
+/// Output for work start - full context for executing a task
+pub struct WorkOutput {
+    pub task: Task,
+    pub project: Project,
+    pub steering: Vec<SteeringInfo>,
+}
+
+impl Output for WorkOutput {
+    fn output_type() -> OutputType {
+        OutputType::Prompt // LLM-first command
+    }
+
+    fn to_json(&self) -> String {
+        let json_output = WorkJsonOutput {
+            task: &self.task,
+            project: WorkProjectJson {
+                id: &self.project.id,
+                name: &self.project.name,
+            },
+            steering: &self.steering,
+        };
+        serde_json::to_string_pretty(&json_output).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        format_work_context(&self.task, &self.project, &self.steering)
+    }
+
+    fn to_text(&self) -> String {
+        format!("Working on: {} - {}", self.task.id, self.task.title)
+    }
+}
+
+#[derive(Serialize)]
+struct WorkJsonOutput<'a> {
+    task: &'a Task,
+    project: WorkProjectJson<'a>,
+    steering: &'a [SteeringInfo],
+}
+
+#[derive(Serialize)]
+struct WorkProjectJson<'a> {
+    id: &'a str,
+    name: &'a str,
+}
+
+/// Output for work done - simple status message
+pub struct WorkDoneOutput;
+
+impl Output for WorkDoneOutput {
+    fn output_type() -> OutputType {
+        OutputType::Text // Simple status
+    }
+
+    fn to_json(&self) -> String {
+        r#"{"status": "done"}"#.to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        "Done.".to_string()
+    }
+
+    fn to_text(&self) -> String {
+        "Done.".to_string()
+    }
+}
+
+/// Output for work block - simple status message
+pub struct WorkBlockOutput;
+
+impl Output for WorkBlockOutput {
+    fn output_type() -> OutputType {
+        OutputType::Text // Simple status
+    }
+
+    fn to_json(&self) -> String {
+        r#"{"status": "blocked"}"#.to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        "Blocked.".to_string()
+    }
+
+    fn to_text(&self) -> String {
+        "Blocked.".to_string()
+    }
+}
+
+/// Output for work release - simple status message
+pub struct WorkReleaseOutput;
+
+impl Output for WorkReleaseOutput {
+    fn output_type() -> OutputType {
+        OutputType::Text // Simple status
+    }
+
+    fn to_json(&self) -> String {
+        r#"{"status": "released"}"#.to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        "Released.".to_string()
+    }
+
+    fn to_text(&self) -> String {
+        "Released.".to_string()
+    }
+}
+
 /// Handle work commands
-pub async fn work(command: WorkCommand) -> Result<()> {
+pub async fn work(command: WorkCommand, cli_format: Option<CliOutputFormat>) -> Result<()> {
     match command {
         WorkCommand::Start { task_id, owner } => {
-            work_start(&task_id, owner).await?;
+            work_start(&task_id, owner, cli_format).await?;
         }
-        WorkCommand::Done { task_id, summary } => {
-            work_done(&task_id, &summary).await?;
+        WorkCommand::Done {
+            task_id,
+            summary_positional,
+            summary_flag,
+        } => {
+            let summary = summary_positional.or(summary_flag).ok_or_else(|| {
+                GranaryError::InvalidArgument(
+                    "Summary is required. Usage: granary work done <task-id> <summary>".to_string(),
+                )
+            })?;
+            work_done(&task_id, &summary, cli_format).await?;
         }
-        WorkCommand::Block { task_id, reason } => {
-            work_block(&task_id, &reason).await?;
+        WorkCommand::Block {
+            task_id,
+            reason_positional,
+            reason_flag,
+        } => {
+            let reason = reason_positional.or(reason_flag).ok_or_else(|| {
+                GranaryError::InvalidArgument(
+                    "Reason is required. Usage: granary work block <task-id> <reason>".to_string(),
+                )
+            })?;
+            work_block(&task_id, &reason, cli_format).await?;
         }
         WorkCommand::Release { task_id } => {
-            work_release(&task_id).await?;
+            work_release(&task_id, cli_format).await?;
         }
     }
 
@@ -31,7 +162,11 @@ pub async fn work(command: WorkCommand) -> Result<()> {
 }
 
 /// Start working on a task - claims it and outputs full context
-async fn work_start(task_id: &str, owner: Option<String>) -> Result<()> {
+async fn work_start(
+    task_id: &str,
+    owner: Option<String>,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -77,10 +212,6 @@ async fn work_start(task_id: &str, owner: Option<String>) -> Result<()> {
 
     // 5. Check if task is in draft status
     if task.status == "draft" {
-        eprintln!(
-            "Task is in draft status. Use 'granary task {} ready' first. Exiting.",
-            task_id
-        );
         return Err(GranaryError::Conflict(format!(
             "Task {} is in draft status",
             task_id
@@ -98,14 +229,23 @@ async fn work_start(task_id: &str, owner: Option<String>) -> Result<()> {
     // 8. Fetch steering files for this task
     let steering = fetch_steering_for_work(&pool, &workspace, task_id, &task.project_id).await?;
 
-    // 9. Output the context in markdown format
-    output_work_context(&task, &project, &steering);
+    // 9. Output the context
+    let output = WorkOutput {
+        task,
+        project,
+        steering,
+    };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }
 
 /// Mark task as done
-async fn work_done(task_id: &str, summary: &str) -> Result<()> {
+async fn work_done(
+    task_id: &str,
+    summary: &str,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -117,12 +257,17 @@ async fn work_done(task_id: &str, summary: &str) -> Result<()> {
     // Complete the task with a comment
     services::complete_task(&pool, task_id, Some(summary)).await?;
 
-    println!("Done.");
+    let output = WorkDoneOutput;
+    println!("{}", output.format(cli_format));
     Ok(())
 }
 
 /// Block task with reason
-async fn work_block(task_id: &str, reason: &str) -> Result<()> {
+async fn work_block(
+    task_id: &str,
+    reason: &str,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -134,12 +279,13 @@ async fn work_block(task_id: &str, reason: &str) -> Result<()> {
     // Block the task
     services::block_task(&pool, task_id, reason).await?;
 
-    println!("Blocked.");
+    let output = WorkBlockOutput;
+    println!("{}", output.format(cli_format));
     Ok(())
 }
 
 /// Release task (give up claim)
-async fn work_release(task_id: &str) -> Result<()> {
+async fn work_release(task_id: &str, cli_format: Option<CliOutputFormat>) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
@@ -151,7 +297,8 @@ async fn work_release(task_id: &str) -> Result<()> {
     // Release the task claim
     services::release_task(&pool, task_id).await?;
 
-    println!("Released.");
+    let output = WorkReleaseOutput;
+    println!("{}", output.format(cli_format));
     Ok(())
 }
 
@@ -221,66 +368,32 @@ fn resolve_steering_file(
     })
 }
 
-/// Output work context in markdown format
-fn output_work_context(
-    task: &crate::models::Task,
-    project: &crate::models::Project,
-    steering: &[SteeringInfo],
-) {
+/// Format work context in markdown format
+fn format_work_context(task: &Task, project: &Project, steering: &[SteeringInfo]) -> String {
+    let mut output = String::new();
+
     // Header with task ID and title
-    println!("## {}: {}", task.id, task.title);
-    println!();
+    output.push_str(&format!("## {}: {}\n\n", task.id, task.title));
 
     // Metadata
-    println!("Project: {}", project.id);
-    println!("Priority: {}", task.priority);
-    println!();
+    output.push_str(&format!("Project: {}\n", project.id));
+    output.push_str(&format!("Priority: {}\n\n", task.priority));
 
     // Goal/Description
     if let Some(ref description) = task.description {
         // Try to extract Goal if it's structured in the description
         if description.contains("**Goal:**") {
             // The description has structured content, output it as-is
-            println!("{}", description);
+            output.push_str(description);
         } else {
-            println!("**Goal:** {}", description);
+            output.push_str(&format!("**Goal:** {}", description));
         }
-        println!();
-    }
-
-    // Extract files to modify from description if present
-    // (This is a heuristic - if the description contains file paths)
-    if let Some(ref description) = task.description {
-        if description.contains("**Files to") {
-            // Files are already in the description, don't duplicate
-        } else {
-            // Try to extract file paths from description
-            let files: Vec<&str> = description
-                .lines()
-                .filter(|line| {
-                    line.contains(".rs")
-                        || line.contains(".ts")
-                        || line.contains(".js")
-                        || line.contains(".py")
-                        || line.contains("src/")
-                        || line.contains("lib/")
-                })
-                .collect();
-
-            if !files.is_empty() {
-                println!("**Files to modify:**");
-                for file in files {
-                    println!("- {}", file.trim_start_matches("- ").trim());
-                }
-                println!();
-            }
-        }
+        output.push_str("\n\n");
     }
 
     // Steering files
     if !steering.is_empty() {
-        println!("## Steering");
-        println!();
+        output.push_str("## Steering\n\n");
 
         for sf in steering {
             // Include scope indicator in the tag
@@ -291,28 +404,39 @@ fn output_work_context(
                 .unwrap_or_default();
 
             if let Some(ref content) = sf.content {
-                println!("<steering_file path=\"{}\"{}>", sf.path, scope_attr);
-                println!("{}", content);
-                println!("</steering_file>");
-                println!();
+                output.push_str(&format!(
+                    "<steering_file path=\"{}\"{}>\n",
+                    sf.path, scope_attr
+                ));
+                output.push_str(content);
+                output.push_str("\n</steering_file>\n\n");
             } else {
-                println!("<steering_file path=\"{}\"{}>", sf.path, scope_attr);
-                println!("(reference to external document)");
-                println!("</steering_file>");
-                println!();
+                output.push_str(&format!(
+                    "<steering_file path=\"{}\"{}>\n",
+                    sf.path, scope_attr
+                ));
+                output.push_str("(reference to external document)\n");
+                output.push_str("</steering_file>\n\n");
             }
         }
     }
 
     // Instructions for completion
-    println!("## When Done");
-    println!("```bash");
-    println!("granary work done {} \"summary of changes\"", task.id);
-    println!("```");
-    println!();
+    output.push_str("CRITICAL:\n- when done\n");
+    output.push_str("```bash\n");
+    output.push_str(&format!(
+        "granary work done {} \"summary of changes\"\n",
+        task.id
+    ));
+    output.push_str("```\n\n");
 
-    println!("## If Blocked");
-    println!("```bash");
-    println!("granary work block {} \"reason for blocking\"", task.id);
-    println!("```");
+    output.push_str("- if blocked\n");
+    output.push_str("```bash\n");
+    output.push_str(&format!(
+        "granary work block {} \"reason for blocking\"\n",
+        task.id
+    ));
+    output.push_str("```");
+
+    output
 }

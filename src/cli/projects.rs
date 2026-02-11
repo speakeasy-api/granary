@@ -1,83 +1,161 @@
+use granary_types::{CreateProject, CreateTask, Project, Task, UpdateProject};
+
 use crate::cli::args::{
-    ProjectAction, ProjectDepsAction, ProjectSteerAction, ProjectTasksAction, ProjectsAction,
+    CliOutputFormat, ProjectAction, ProjectDepsAction, ProjectSteerAction, ProjectTasksAction,
 };
+use crate::cli::tasks::TaskCreatedOutput;
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::db;
 use crate::error::Result;
-use crate::models::*;
-use crate::output::{Formatter, OutputFormat};
+use crate::output::{Output, json, prompt, table};
 use crate::services::{self, Workspace};
 use std::time::Duration;
 
-/// Handle projects command (list or create)
-pub async fn projects(
-    action: Option<ProjectsAction>,
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for a list of projects
+pub struct ProjectsOutput {
+    pub projects: Vec<Project>,
+}
+
+impl Output for ProjectsOutput {
+    fn to_json(&self) -> String {
+        json::format_projects(&self.projects)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_projects(&self.projects)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_projects(&self.projects)
+    }
+}
+
+/// Output for a single project
+pub struct ProjectOutput {
+    pub project: Project,
+}
+
+impl Output for ProjectOutput {
+    fn to_json(&self) -> String {
+        json::format_project(&self.project)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_project(&self.project)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_project(&self.project)
+    }
+}
+
+/// Output for a list of tasks with dependencies (used in project tasks listing)
+pub struct ProjectTasksOutput {
+    pub tasks: Vec<(Task, Vec<String>)>,
+}
+
+impl Output for ProjectTasksOutput {
+    fn to_json(&self) -> String {
+        json::format_tasks_with_deps(&self.tasks)
+    }
+
+    fn to_prompt(&self) -> String {
+        let refs: Vec<(&Task, &[String])> =
+            self.tasks.iter().map(|(t, d)| (t, d.as_slice())).collect();
+        prompt::format_tasks_with_deps(&refs)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_tasks_with_deps(&self.tasks)
+    }
+}
+
+/// Handle project list command
+pub async fn list(
     include_archived: bool,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
     watch: bool,
     interval: u64,
 ) -> Result<()> {
+    if watch {
+        let interval_duration = Duration::from_secs(interval);
+        watch_loop(interval_duration, || async {
+            let output = fetch_and_format_projects(include_archived, cli_format)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            Ok(format!(
+                "{}\n\n{}",
+                watch_status_line(interval_duration),
+                output
+            ))
+        })
+        .await?;
+        Ok(())
+    } else {
+        let output = fetch_and_format_projects(include_archived, cli_format).await?;
+        println!("{}", output);
+        Ok(())
+    }
+}
+
+/// Handle project action without an ID (e.g., `granary project create "name"`)
+pub async fn project_action_without_id(
+    action: ProjectAction,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     match action {
-        None => {
-            // List projects - support watch mode
-            if watch {
-                let interval_duration = Duration::from_secs(interval);
-                watch_loop(interval_duration, || async {
-                    let output = fetch_and_format_projects(include_archived, format)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("{}", e))?;
-                    Ok(format!(
-                        "{}\n\n{}",
-                        watch_status_line(interval_duration),
-                        output
-                    ))
-                })
-                .await?;
-                Ok(())
-            } else {
-                let output = fetch_and_format_projects(include_archived, format).await?;
-                println!("{}", output);
-                Ok(())
-            }
-        }
-        Some(ProjectsAction::Create {
+        ProjectAction::Create {
             name,
+            name_flag,
             description,
             owner,
             tags,
-        }) => create_project(&name, description, owner, tags, format).await,
+        } => {
+            let resolved_name = name.or(name_flag).ok_or_else(|| {
+                crate::error::GranaryError::InvalidArgument(
+                    "Project name is required. Usage: granary project create <name>".to_string(),
+                )
+            })?;
+            create_project(&resolved_name, description, owner, tags, cli_format).await
+        }
+        _ => Err(crate::error::GranaryError::InvalidArgument(
+            "Project ID is required for this action".to_string(),
+        )),
     }
 }
 
 /// Fetch and format all projects as a string
-async fn fetch_and_format_projects(include_archived: bool, format: OutputFormat) -> Result<String> {
+async fn fetch_and_format_projects(
+    include_archived: bool,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<String> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
     let projects = services::list_projects(&pool, include_archived).await?;
-    let formatter = Formatter::new(format);
-    Ok(formatter.format_projects(&projects))
+    let output = ProjectsOutput { projects };
+    Ok(output.format(cli_format))
 }
 
 /// Show or manage a project
-pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputFormat) -> Result<()> {
+pub async fn project(
+    id: &str,
+    action: Option<ProjectAction>,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
-
-    // Check if this is a create command
-    if id == "create" {
-        return Err(crate::error::GranaryError::InvalidArgument(
-            "Use 'granary projects create <name>' to create a project".to_string(),
-        ));
-    }
-
-    let formatter = Formatter::new(format);
 
     match action {
         None => {
             // Show project details
             let project = services::get_project(&pool, id).await?;
-            println!("{}", formatter.format_project(&project));
+            let output = ProjectOutput { project };
+            println!("{}", output.format(cli_format));
         }
 
         Some(ProjectAction::Update {
@@ -101,12 +179,27 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
             )
             .await?;
 
-            println!("{}", formatter.format_project(&project));
+            let output = ProjectOutput { project };
+            println!("{}", output.format(cli_format));
+        }
+
+        Some(ProjectAction::Done { complete_tasks }) => {
+            let project = services::complete_project(&pool, id, complete_tasks).await?;
+            if complete_tasks {
+                println!("Completed project (and all tasks): {}", project.id);
+            } else {
+                println!("Completed project: {}", project.id);
+            }
         }
 
         Some(ProjectAction::Archive) => {
             let project = services::archive_project(&pool, id).await?;
             println!("Archived project: {}", project.id);
+        }
+
+        Some(ProjectAction::Unarchive) => {
+            let project = services::unarchive_project(&pool, id).await?;
+            println!("Unarchived project: {}", project.id);
         }
 
         Some(ProjectAction::Tasks { action }) => {
@@ -115,18 +208,29 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
                     // List tasks with dependency info
                     let tasks = services::list_tasks_by_project(&pool, id).await?;
                     let tasks_with_deps = services::get_tasks_with_deps(&pool, tasks).await?;
-                    println!("{}", formatter.format_tasks_with_deps(&tasks_with_deps));
+                    let output = ProjectTasksOutput {
+                        tasks: tasks_with_deps,
+                    };
+                    println!("{}", output.format(cli_format));
                 }
                 Some(ProjectTasksAction::Create {
-                    title,
+                    title_positional,
+                    title_flag,
                     description,
                     priority,
+                    status,
                     owner,
                     dependencies,
                     tags,
                     due,
                 }) => {
+                    let title = title_positional.or(title_flag).ok_or_else(|| {
+                        crate::error::GranaryError::InvalidArgument(
+                            "Task title is required. Usage: granary project <id> tasks create <title>".to_string(),
+                        )
+                    })?;
                     let priority = priority.parse().unwrap_or_default();
+                    let status = status.parse().unwrap_or_default();
                     let tags = tags
                         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                         .unwrap_or_default();
@@ -138,6 +242,7 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
                             title,
                             description,
                             priority,
+                            status,
                             owner,
                             tags,
                             due_at: due,
@@ -153,13 +258,14 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
                         }
                     }
 
-                    println!("{}", formatter.format_task_created(&task));
+                    let output = TaskCreatedOutput { task };
+                    println!("{}", output.format(cli_format));
                 }
             }
         }
 
         Some(ProjectAction::Deps { action }) => {
-            handle_deps_action(&pool, id, action, format).await?;
+            handle_deps_action(&pool, id, action, cli_format).await?;
         }
 
         Some(ProjectAction::Summary) => {
@@ -193,8 +299,8 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
                 return Ok(());
             }
 
-            // Count draft tasks
-            let draft_count = tasks.iter().filter(|t| t.status == "draft").count();
+            // Update all draft tasks to todo
+            let updated_count = db::tasks::set_draft_tasks_to_todo(&pool, id).await?;
 
             // Get project dependencies
             let deps = db::project_dependencies::list(&pool, id).await?;
@@ -208,17 +314,21 @@ pub async fn project(id: &str, action: Option<ProjectAction>, format: OutputForm
             println!("Dependencies configured: {}", deps.len());
             println!("Steering files: {}", steering_files.len());
 
-            if draft_count > 0 {
+            if updated_count > 0 {
                 println!();
-                println!(
-                    "Warning: {} draft task(s) found. Use `granary task <id> ready` to activate.",
-                    draft_count
-                );
+                println!("Activated {} draft task(s) (draft -> todo).", updated_count);
             }
         }
 
         Some(ProjectAction::Steer { action }) => {
             handle_steer_action(&pool, id, action).await?;
+        }
+
+        Some(ProjectAction::Create { .. }) => {
+            return Err(crate::error::GranaryError::InvalidArgument(
+                "Cannot create a project with an ID. Use: granary project create <name>"
+                    .to_string(),
+            ));
         }
     }
 
@@ -230,10 +340,8 @@ async fn handle_deps_action(
     pool: &sqlx::SqlitePool,
     project_id: &str,
     action: ProjectDepsAction,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
-    let formatter = Formatter::new(format);
-
     match action {
         ProjectDepsAction::Add { depends_on_id } => {
             // Verify both projects exist
@@ -269,7 +377,8 @@ async fn handle_deps_action(
                 println!("No dependencies for project {}", project_id);
             } else {
                 println!("Dependencies for {}:", project_id);
-                println!("{}", formatter.format_projects(&deps));
+                let output = ProjectsOutput { projects: deps };
+                println!("{}", output.format(cli_format));
             }
         }
 
@@ -327,7 +436,7 @@ pub async fn create_project(
     description: Option<String>,
     owner: Option<String>,
     tags: Option<String>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
@@ -348,8 +457,8 @@ pub async fn create_project(
     )
     .await?;
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_project(&project));
+    let output = ProjectOutput { project };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }

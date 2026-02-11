@@ -12,6 +12,7 @@ pub async fn create_pool(db_path: &Path) -> Result<SqlitePool> {
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .foreign_keys(true)
+        .pragma("recursive_triggers", "ON")
         .busy_timeout(std::time::Duration::from_secs(30));
 
     let pool = SqlitePoolOptions::new()

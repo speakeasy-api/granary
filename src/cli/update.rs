@@ -5,7 +5,142 @@ use chrono::{DateTime, Utc};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+use crate::cli::args::CliOutputFormat;
 use crate::error::{GranaryError, Result};
+use crate::output::Output;
+
+/// Output for update check (--check or already up-to-date)
+pub struct UpdateCheckOutput {
+    pub current_version: String,
+    pub latest_stable: String,
+    pub latest_prerelease: Option<String>,
+    pub has_update: bool,
+}
+
+impl Output for UpdateCheckOutput {
+    fn to_json(&self) -> String {
+        let json = UpdateCheckJson {
+            current_version: &self.current_version,
+            latest_stable: &self.latest_stable,
+            latest_prerelease: self.latest_prerelease.as_deref(),
+            has_update: self.has_update,
+        };
+        serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        let mut out = if self.has_update {
+            format!(
+                "Update available: {} → {}\nRun `granary update` to install.",
+                self.current_version, self.latest_stable
+            )
+        } else {
+            format!(
+                "granary {} is the latest stable version.",
+                self.current_version
+            )
+        };
+        if let Some(pre) = &self.latest_prerelease {
+            out.push_str(&format!(
+                "\nPre-release available: {} (install with: granary update --to={})",
+                pre, pre
+            ));
+        }
+        out
+    }
+
+    fn to_text(&self) -> String {
+        let mut out = String::new();
+        if self.has_update {
+            out.push_str(&format!("Current version: {}\n", self.current_version));
+            out.push_str(&format!("Latest version:  {}\n", self.latest_stable));
+        } else {
+            out.push_str(&format!(
+                "granary {} is the latest stable version\n",
+                self.current_version
+            ));
+        }
+        if let Some(pre) = &self.latest_prerelease {
+            out.push_str(&format!("\nPre-release available: {}\n", pre));
+            out.push_str(&format!("Install with: granary update --to={}\n", pre));
+        }
+        if self.has_update {
+            out.push_str("\nRun `granary update` to install the latest stable version.");
+        }
+        out
+    }
+}
+
+#[derive(Serialize)]
+struct UpdateCheckJson<'a> {
+    current_version: &'a str,
+    latest_stable: &'a str,
+    latest_prerelease: Option<&'a str>,
+    has_update: bool,
+}
+
+/// Output for actual update result
+pub struct UpdateOutput {
+    pub from_version: String,
+    pub to_version: String,
+    pub success: bool,
+    pub latest_prerelease: Option<String>,
+}
+
+impl Output for UpdateOutput {
+    fn to_json(&self) -> String {
+        let json = UpdateJson {
+            from_version: &self.from_version,
+            to_version: &self.to_version,
+            success: self.success,
+        };
+        serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.success {
+            let mut out = format!(
+                "Successfully updated granary {} → {}.",
+                self.from_version, self.to_version
+            );
+            if let Some(pre) = &self.latest_prerelease {
+                out.push_str(&format!(
+                    "\nPre-release {} also available (install with: granary update --to={}).",
+                    pre, pre
+                ));
+            }
+            out
+        } else {
+            format!(
+                "Failed to update granary from {} to {}.",
+                self.from_version, self.to_version
+            )
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.success {
+            let mut out = format!("Successfully updated to granary {}!", self.to_version);
+            if let Some(pre) = &self.latest_prerelease {
+                out.push_str(&format!("\n\nPre-release {} is also available.", pre));
+                out.push_str(&format!("\nInstall with: granary update --to={}", pre));
+            }
+            out
+        } else {
+            format!(
+                "Failed to update granary from {} to {}.",
+                self.from_version, self.to_version
+            )
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct UpdateJson<'a> {
+    from_version: &'a str,
+    to_version: &'a str,
+    success: bool,
+}
 
 const GITHUB_REPO: &str = "speakeasy-api/granary";
 const CACHE_TTL_HOURS: i64 = 24;
@@ -232,7 +367,11 @@ fn run_install_script(version: Option<&str>) -> Result<()> {
 }
 
 /// Main update command handler
-pub async fn update(check_only: bool, target_version: Option<String>) -> Result<()> {
+pub async fn update(
+    check_only: bool,
+    target_version: Option<String>,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     let current = env!("CARGO_PKG_VERSION");
 
     // If a specific version is requested, install it directly
@@ -242,8 +381,13 @@ pub async fn update(check_only: bool, target_version: Option<String>) -> Result<
 
         run_install_script(Some(version))?;
 
-        println!();
-        println!("Successfully installed granary {}!", version);
+        let output = UpdateOutput {
+            from_version: current.to_string(),
+            to_version: version.clone(),
+            success: true,
+            latest_prerelease: None,
+        };
+        println!("{}", output.format(cli_format));
         return Ok(());
     }
 
@@ -273,32 +417,14 @@ pub async fn update(check_only: bool, target_version: Option<String>) -> Result<
         }
     });
 
-    if !has_stable_update {
-        println!("granary {} is the latest stable version", current);
-
-        // Show prerelease info if available and newer
-        if let Some(pre) = &newer_prerelease {
-            println!();
-            println!("Pre-release available: {}", pre);
-            println!("Install with: granary update --to={}", pre);
-        }
-
-        return Ok(());
-    }
-
-    if check_only {
-        println!("Current version: {}", current);
-        println!("Latest version:  {}", info.latest_stable);
-
-        // Show prerelease info if available and newer
-        if let Some(pre) = &newer_prerelease {
-            println!();
-            println!("Pre-release available: {}", pre);
-            println!("Install with: granary update --to={}", pre);
-        }
-
-        println!();
-        println!("Run `granary update` to install the latest stable version.");
+    if !has_stable_update || check_only {
+        let output = UpdateCheckOutput {
+            current_version: current.to_string(),
+            latest_stable: info.latest_stable.clone(),
+            latest_prerelease: newer_prerelease,
+            has_update: has_stable_update,
+        };
+        println!("{}", output.format(cli_format));
         return Ok(());
     }
 
@@ -307,15 +433,13 @@ pub async fn update(check_only: bool, target_version: Option<String>) -> Result<
 
     run_install_script(None)?;
 
-    println!();
-    println!("Successfully updated to granary {}!", info.latest_stable);
-
-    // Inform about prerelease if available
-    if let Some(pre) = &newer_prerelease {
-        println!();
-        println!("Pre-release {} is also available.", pre);
-        println!("Install with: granary update --to={}", pre);
-    }
+    let output = UpdateOutput {
+        from_version: current.to_string(),
+        to_version: info.latest_stable,
+        success: true,
+        latest_prerelease: newer_prerelease,
+    };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }

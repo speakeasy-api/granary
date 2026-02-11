@@ -5,7 +5,9 @@ pub mod comments;
 pub mod config;
 pub mod daemon;
 pub mod entrypoint;
+pub mod events;
 pub mod init;
+pub mod initiate;
 pub mod initiatives;
 pub mod plan;
 pub mod projects;
@@ -20,5 +22,6 @@ pub mod watch;
 pub mod work;
 pub mod worker;
 pub mod workers;
+pub mod workspace;
 
 pub use args::*;

@@ -109,12 +109,12 @@ function Install-Granary {
             New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
         }
 
-        # Install binary
+        # Install binaries
         Write-Info "Installing to $InstallDir..."
-        $binaryPath = Join-Path $tempDir "$BinaryName.exe"
-        Copy-Item -Path $binaryPath -Destination (Join-Path $InstallDir "$BinaryName.exe") -Force
+        Copy-Item -Path (Join-Path $tempDir "$BinaryName.exe") -Destination (Join-Path $InstallDir "$BinaryName.exe") -Force
+        Copy-Item -Path (Join-Path $tempDir "granaryd.exe") -Destination (Join-Path $InstallDir "granaryd.exe") -Force
 
-        Write-Success "Granary $version installed successfully!"
+        Write-Success "Granary $version installed successfully (granary + granaryd)!"
 
         # Check if install directory is in PATH
         $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

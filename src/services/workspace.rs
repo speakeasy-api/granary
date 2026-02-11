@@ -5,6 +5,8 @@ use sqlx::SqlitePool;
 
 use crate::db::connection::{create_pool, run_migrations};
 use crate::error::{GranaryError, Result};
+use crate::services::global_config_service;
+use crate::services::workspace_registry::WorkspaceRegistry;
 
 /// The name of the workspace directory
 pub const WORKSPACE_DIR: &str = ".granary";
@@ -17,45 +19,113 @@ pub const WORKSPACE_ENV: &str = "GRANARY_HOME";
 /// Environment variable for current session
 pub const SESSION_ENV: &str = "GRANARY_SESSION";
 
+/// How this workspace was resolved
+#[derive(Debug, Clone)]
+pub enum WorkspaceMode {
+    /// Default global workspace (~/.granary/granary.db)
+    Default,
+    /// Named workspace under ~/.granary/workspaces/<name>/
+    Named(String),
+    /// Local .granary/ directory in the project tree
+    Local,
+}
+
+impl WorkspaceMode {
+    /// Returns the mode as a display string: "default", "named", or "local"
+    pub fn label(&self) -> &str {
+        match self {
+            WorkspaceMode::Default => "default",
+            WorkspaceMode::Named(_) => "named",
+            WorkspaceMode::Local => "local",
+        }
+    }
+}
+
 /// Workspace represents a Granary workspace directory
 #[derive(Debug)]
 pub struct Workspace {
+    /// Workspace name (None for local-only workspaces)
+    pub name: Option<String>,
     /// Root directory containing .granary/
     pub root: PathBuf,
     /// Path to .granary/ directory
     pub granary_dir: PathBuf,
     /// Path to the database file
     pub db_path: PathBuf,
+    /// How this workspace was resolved
+    pub mode: WorkspaceMode,
 }
 
 impl Workspace {
-    /// Find the workspace by walking up from the current directory
-    /// Similar to how Git finds .git/
+    /// Returns the display name for this workspace.
+    /// Named workspaces use their name, default shows "default",
+    /// local shows the root directory name.
+    pub fn display_name(&self) -> String {
+        match &self.mode {
+            WorkspaceMode::Default => "default".to_string(),
+            WorkspaceMode::Named(name) => name.clone(),
+            WorkspaceMode::Local => self
+                .root
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| self.root.display().to_string()),
+        }
+    }
+
+    /// Find the workspace using the RFC resolution order:
+    /// 1. GRANARY_HOME env var -> explicit override
+    /// 2. Local .granary/ -> walk up from cwd, stop before $HOME
+    /// 3. Registry lookup -> deepest matching root wins
+    /// 4. Default -> ~/.granary/granary.db
     pub fn find() -> Result<Self> {
-        // Check for environment variable override first
+        // Step 1: GRANARY_HOME env var override
         if let Ok(path) = env::var(WORKSPACE_ENV) {
-            let root = PathBuf::from(path);
+            let root = PathBuf::from(&path);
             let granary_dir = root.join(WORKSPACE_DIR);
             if granary_dir.exists() {
                 return Ok(Self {
+                    name: None,
                     root: root.clone(),
                     granary_dir: granary_dir.clone(),
                     db_path: granary_dir.join(DB_FILE),
+                    mode: WorkspaceMode::Local,
                 });
             }
+            // GRANARY_HOME set but path doesn't exist — check if root itself
+            // is a granary dir (e.g. GRANARY_HOME=~/.granary)
+            if root.join(DB_FILE).exists() {
+                return Ok(Self {
+                    name: None,
+                    root: root.clone(),
+                    granary_dir: root.clone(),
+                    db_path: root.join(DB_FILE),
+                    mode: WorkspaceMode::Local,
+                });
+            }
+            return Err(GranaryError::WorkspaceNotFound(path));
         }
 
-        // Walk up from current directory
         let cwd = env::current_dir()?;
-        let mut current = cwd.as_path();
+        let home_dir = dirs::home_dir();
 
+        // Step 2: Walk up from cwd looking for .granary/, stop BEFORE $HOME
+        let mut current = cwd.as_path();
         loop {
+            // Stop before $HOME — don't pick up ~/.granary as a local workspace
+            if let Some(ref home) = home_dir
+                && current == home.as_path()
+            {
+                break;
+            }
+
             let granary_dir = current.join(WORKSPACE_DIR);
             if granary_dir.exists() && granary_dir.is_dir() {
                 return Ok(Self {
+                    name: None,
                     root: current.to_path_buf(),
                     granary_dir: granary_dir.clone(),
                     db_path: granary_dir.join(DB_FILE),
+                    mode: WorkspaceMode::Local,
                 });
             }
 
@@ -65,20 +135,58 @@ impl Workspace {
             }
         }
 
-        Err(GranaryError::WorkspaceNotFound)
-    }
-
-    /// Find workspace or create one at the specified path
-    pub fn find_or_create(path: Option<&Path>) -> Result<Self> {
-        // Try to find existing workspace first
-        if let Ok(ws) = Self::find() {
-            return Ok(ws);
+        // Step 3: Registry lookup — check if cwd or ancestor matches a registered root
+        if let Ok(registry) = WorkspaceRegistry::load() {
+            // lookup_root walks up from cwd and finds the deepest match
+            if let Some(workspace_name) = registry.lookup_root(&cwd)
+                && let Ok(db_path) = WorkspaceRegistry::workspace_db_path(workspace_name)
+            {
+                let ws_dir = db_path.parent().unwrap().to_path_buf();
+                return Ok(Self {
+                    name: Some(workspace_name.to_string()),
+                    root: cwd.clone(),
+                    granary_dir: ws_dir,
+                    db_path,
+                    mode: WorkspaceMode::Named(workspace_name.to_string()),
+                });
+            }
         }
 
-        // Create new workspace
+        // Step 4: Default — use ~/.granary/granary.db
+        let config_dir = global_config_service::config_dir()?;
+        let db_path = config_dir.join(DB_FILE);
+        // Auto-create ~/.granary/ if it doesn't exist
+        if !config_dir.exists() {
+            std::fs::create_dir_all(&config_dir)?;
+        }
+        Ok(Self {
+            name: None,
+            root: home_dir.unwrap_or(cwd),
+            granary_dir: config_dir,
+            db_path,
+            mode: WorkspaceMode::Default,
+        })
+    }
+
+    /// Find workspace or create a local one at the specified path.
+    /// Since find() now always resolves to a workspace (falling through to default),
+    /// this is only needed for explicit `init` to create a local .granary/ directory.
+    pub fn find_or_create(path: Option<&Path>) -> Result<Self> {
         let root = path
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| env::current_dir().expect("Failed to get current directory"));
+
+        let granary_dir = root.join(WORKSPACE_DIR);
+        if granary_dir.exists() {
+            // Already has a local workspace, just return it
+            return Ok(Self {
+                name: None,
+                root: root.clone(),
+                granary_dir: granary_dir.clone(),
+                db_path: granary_dir.join(DB_FILE),
+                mode: WorkspaceMode::Local,
+            });
+        }
 
         Self::create(&root)
     }
@@ -97,29 +205,50 @@ impl Workspace {
         std::fs::create_dir_all(&granary_dir)?;
 
         Ok(Self {
+            name: None,
             root: root.to_path_buf(),
             granary_dir: granary_dir.clone(),
             db_path: granary_dir.join(DB_FILE),
+            mode: WorkspaceMode::Local,
         })
     }
 
     /// Open an existing workspace at the specified path.
     ///
-    /// Unlike `find()`, this does not walk up the directory tree.
-    /// The path should be the root directory containing `.granary/`.
+    /// Checks for a local `.granary/` directory first, then falls back to
+    /// registry lookup for named workspaces whose data lives under
+    /// `~/.granary/workspaces/<name>/`.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         let granary_dir = root.join(WORKSPACE_DIR);
 
-        if !granary_dir.exists() {
-            return Err(GranaryError::WorkspaceNotFound);
+        // Local .granary/ directory exists — use it directly
+        if granary_dir.exists() {
+            return Ok(Self {
+                name: None,
+                root,
+                granary_dir: granary_dir.clone(),
+                db_path: granary_dir.join(DB_FILE),
+                mode: WorkspaceMode::Local,
+            });
         }
 
-        Ok(Self {
-            root,
-            granary_dir: granary_dir.clone(),
-            db_path: granary_dir.join(DB_FILE),
-        })
+        // Fall back to registry: the path may be a root registered to a named workspace
+        if let Ok(registry) = WorkspaceRegistry::load()
+            && let Some(workspace_name) = registry.lookup_root(&root)
+            && let Ok(db_path) = WorkspaceRegistry::workspace_db_path(workspace_name)
+        {
+            let ws_dir = db_path.parent().unwrap().to_path_buf();
+            return Ok(Self {
+                name: Some(workspace_name.to_string()),
+                root,
+                granary_dir: ws_dir,
+                db_path,
+                mode: WorkspaceMode::Named(workspace_name.to_string()),
+            });
+        }
+
+        Err(GranaryError::WorkspaceNotFound(root.display().to_string()))
     }
 
     /// Initialize the database and run migrations
@@ -132,7 +261,9 @@ impl Workspace {
     /// Get a connection pool to the database
     pub async fn pool(&self) -> Result<SqlitePool> {
         if !self.db_path.exists() {
-            return Err(GranaryError::WorkspaceNotFound);
+            return Err(GranaryError::WorkspaceNotFound(
+                self.db_path.display().to_string(),
+            ));
         }
         let pool = create_pool(&self.db_path).await?;
         // Run migrations to ensure schema is up to date
@@ -178,9 +309,58 @@ impl Workspace {
         Ok(())
     }
 
+    /// Returns the matched root directory for named workspaces by looking up
+    /// the registry. Returns None for default/local modes.
+    pub fn matched_root(&self) -> Option<String> {
+        if let WorkspaceMode::Named(name) = &self.mode
+            && let Ok(registry) = crate::services::workspace_registry::WorkspaceRegistry::load()
+        {
+            for (path, ws_name) in &registry.roots {
+                if ws_name == name {
+                    return Some(path.display().to_string());
+                }
+            }
+        }
+        None
+    }
+
     /// Run diagnostic checks on the workspace
     pub async fn doctor(&self) -> Result<Vec<DiagnosticResult>> {
         let mut results = Vec::new();
+
+        // Workspace name
+        results.push(DiagnosticResult {
+            check: "Workspace".to_string(),
+            status: DiagnosticStatus::Info,
+            message: self.display_name(),
+        });
+
+        // Workspace mode
+        results.push(DiagnosticResult {
+            check: "Mode".to_string(),
+            status: DiagnosticStatus::Info,
+            message: self.mode.label().to_string(),
+        });
+
+        // Database path
+        results.push(DiagnosticResult {
+            check: "Database".to_string(),
+            status: if self.db_path.exists() {
+                DiagnosticStatus::Ok
+            } else {
+                DiagnosticStatus::Error
+            },
+            message: format!("{}", self.db_path.display()),
+        });
+
+        // Root directory for named workspaces
+        if let Some(root) = self.matched_root() {
+            results.push(DiagnosticResult {
+                check: "Root".to_string(),
+                status: DiagnosticStatus::Info,
+                message: format!("{} (matched from registry)", root),
+            });
+        }
 
         // Check .granary directory
         results.push(DiagnosticResult {
@@ -299,6 +479,7 @@ pub enum DiagnosticStatus {
     Warning,
     Error,
     Info,
+    Fix,
 }
 
 #[derive(Debug)]
@@ -315,6 +496,17 @@ impl DiagnosticResult {
             DiagnosticStatus::Warning => "[WARN]",
             DiagnosticStatus::Error => "[ERR]",
             DiagnosticStatus::Info => "[INFO]",
+            DiagnosticStatus::Fix => "[FIX]",
+        }
+    }
+
+    pub fn status_str(&self) -> &'static str {
+        match self.status {
+            DiagnosticStatus::Ok => "ok",
+            DiagnosticStatus::Warning => "warning",
+            DiagnosticStatus::Error => "error",
+            DiagnosticStatus::Info => "info",
+            DiagnosticStatus::Fix => "fixed",
         }
     }
 }

@@ -1,11 +1,11 @@
 pub mod agent_files;
 pub mod batch_service;
 pub mod checkpoint_service;
+pub mod event_consumer;
 pub mod event_poller;
 pub mod filter;
 pub mod global_config;
 pub mod initiative_service;
-pub mod polled_events;
 pub mod project_service;
 pub mod runner;
 pub mod search_service;
@@ -15,6 +15,7 @@ pub mod task_service;
 pub mod template;
 pub mod worker_runtime;
 pub mod workspace;
+pub mod workspace_registry;
 
 // Test modules
 #[cfg(test)]
@@ -29,11 +30,11 @@ mod worker_tests;
 pub use agent_files::*;
 pub use batch_service::*;
 pub use checkpoint_service::*;
-pub use event_poller::{EventPoller, EventPollerConfig, create_poller_for_worker};
+pub use event_consumer::EventConsumerService;
+pub use event_poller::{EventPoller, EventPollerConfig};
 pub use filter::{Filter, FilterOp, matches_all, matches_any, parse_filters};
 pub use global_config as global_config_service;
 pub use initiative_service::*;
-pub use polled_events::PolledEventEmitter;
 pub use project_service::*;
 pub use runner::{RunnerHandle, spawn_runner, spawn_runner_with_env};
 pub use search_service::*;
@@ -46,3 +47,4 @@ pub use worker_runtime::{
     start_worker_runtime,
 };
 pub use workspace::*;
+pub use workspace_registry::WorkspaceRegistry;

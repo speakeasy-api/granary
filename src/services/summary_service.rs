@@ -1,3 +1,4 @@
+use granary_types::Task;
 use sqlx::SqlitePool;
 
 use crate::db;

@@ -1,3 +1,4 @@
+use granary_types::{CreateProject, CreateTask, UpdateProject, UpdateTask};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
@@ -443,23 +444,6 @@ async fn create_comment(pool: &SqlitePool, input: CreateComment) -> Result<Comme
     };
 
     crate::db::comments::create(pool, &comment).await?;
-
-    // Log event
-    crate::db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::CommentCreated,
-            entity_type: EntityType::Comment,
-            entity_id: comment.id.clone(),
-            actor: comment.author.clone(),
-            session_id: None,
-            payload: serde_json::json!({
-                "kind": comment.kind,
-                "parent_id": comment.parent_id,
-            }),
-        },
-    )
-    .await?;
 
     Ok(comment)
 }

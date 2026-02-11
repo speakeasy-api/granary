@@ -29,7 +29,7 @@ use granary::daemon::IpcConnection;
 use granary::daemon::listener::IpcListener;
 use granary::daemon::protocol::{Operation, Request, Response};
 use granary::daemon::worker_manager::WorkerManager;
-use granary::models::global_config::LogRetentionConfig;
+use granary::models::LogRetentionConfig;
 use granary::services::global_config as global_config_service;
 
 #[tokio::main]
@@ -315,7 +315,7 @@ async fn dispatch_request(request: Request, manager: &WorkerManager) -> (Respons
         }
 
         Operation::StartWorker(req) => {
-            let create = granary::models::worker::CreateWorker {
+            let create = granary::models::CreateWorker {
                 runner_name: req.runner_name,
                 command: req.command,
                 args: req.args,
@@ -323,7 +323,6 @@ async fn dispatch_request(request: Request, manager: &WorkerManager) -> (Respons
                 filters: req.filters,
                 concurrency: req.concurrency,
                 instance_path: req.instance_path,
-                poll_cooldown_secs: req.poll_cooldown_secs.unwrap_or(300),
                 detached: !req.attach,
             };
 

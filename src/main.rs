@@ -3,8 +3,8 @@ use std::process::ExitCode;
 
 use granary::cli::args::{Cli, Commands};
 use granary::cli::{
-    batch, checkpoints, config, daemon, entrypoint, init, initiatives, plan, projects, run, search,
-    sessions, show, summary, tasks, update, work, worker, workers,
+    batch, checkpoints, config, daemon, entrypoint, events, init, initiate, initiatives, plan,
+    projects, run, search, sessions, show, summary, tasks, update, work, worker, workspace,
 };
 use granary::error::{GranaryError, exit_codes};
 
@@ -24,53 +24,97 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> granary::Result<()> {
-    let format = cli.output_format();
+    let format_override = cli.output_format_override();
 
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {
-            entrypoint::show_entry_point().await?;
+            entrypoint::show_entry_point(format_override).await?;
             return Ok(());
         }
     };
 
     match command {
-        Commands::Init => {
-            init::init().await?;
+        Commands::Init {
+            local,
+            force,
+            skip_git_check,
+        } => {
+            if local {
+                // --local: delegate to workspace init --local (same behavior as before)
+                workspace::workspace_init(true, force, skip_git_check, None, format_override)
+                    .await?;
+            } else {
+                // Default: generate a random workspace name (e.g. workspace_a3f1k)
+                let random_suffix = nanoid::nanoid!(5, &nanoid::alphabet::SAFE);
+                let generated_name = format!("workspace_{}", random_suffix);
+                workspace::workspace_init(
+                    false,
+                    force,
+                    skip_git_check,
+                    Some(generated_name),
+                    format_override,
+                )
+                .await?;
+            }
         }
 
-        Commands::Doctor => {
-            init::doctor().await?;
+        Commands::Workspace { action } => {
+            workspace::workspace(action, format_override).await?;
         }
 
-        Commands::Plan { name, project } => {
-            plan::plan(&name, project).await?;
+        Commands::Workspaces => {
+            workspace::workspace_list(format_override).await?;
+        }
+
+        Commands::Doctor { fix } => {
+            init::doctor(fix, format_override).await?;
+        }
+
+        Commands::Plan {
+            name,
+            name_flag,
+            project,
+        } => {
+            let resolved_name = name.or(name_flag);
+            plan::plan(resolved_name.as_deref(), project, format_override).await?;
         }
 
         Commands::Work { command } => {
-            work::work(command).await?;
+            work::work(command, format_override).await?;
         }
 
         Commands::Show { id } => {
-            show::show(&id, format).await?;
+            show::show(&id, format_override).await?;
         }
 
-        Commands::Projects { action, all } => {
-            projects::projects(action, all, format, cli.watch, cli.interval).await?;
+        Commands::Project {
+            id: None,
+            action: None,
+            all,
+        } => {
+            projects::list(all, format_override, cli.watch, cli.interval).await?;
         }
 
-        Commands::Project { id, action } => {
-            // Handle "projects create <name>" shorthand
-            if id == "create" {
-                return Err(GranaryError::InvalidArgument(
-                    "To create a project, use: granary project create --name \"Project Name\""
-                        .to_string(),
-                ));
-            }
-            projects::project(&id, action, format).await?;
+        Commands::Project {
+            id: None,
+            action: Some(action),
+            all: _,
+        } => {
+            projects::project_action_without_id(action, format_override).await?;
         }
 
-        Commands::Tasks {
+        Commands::Project {
+            id: Some(id),
+            action,
+            all: _,
+        } => {
+            projects::project(&id, action, format_override).await?;
+        }
+
+        Commands::Task {
+            id: None,
+            action: None,
             all,
             status,
             priority,
@@ -81,22 +125,36 @@ async fn run(cli: Cli) -> granary::Result<()> {
                 status,
                 priority,
                 owner,
-                format,
+                format_override,
                 cli.watch,
                 cli.interval,
             )
             .await?;
         }
 
-        Commands::Task { id, action } => {
-            tasks::task(&id, action, format).await?;
+        Commands::Task {
+            id: Some(id),
+            action,
+            ..
+        } => {
+            tasks::task(&id, action, format_override).await?;
+        }
+
+        Commands::Task {
+            id: None,
+            action: Some(_),
+            ..
+        } => {
+            return Err(GranaryError::InvalidArgument(
+                "Task ID is required when specifying an action".to_string(),
+            ));
         }
 
         Commands::Next {
             include_reason,
             all,
         } => {
-            tasks::next_task(include_reason, all, format).await?;
+            tasks::next_task(include_reason, all, format_override).await?;
         }
 
         Commands::Start {
@@ -104,11 +162,11 @@ async fn run(cli: Cli) -> granary::Result<()> {
             owner,
             lease,
         } => {
-            tasks::start_task(&task_id, owner, lease, format).await?;
+            tasks::start_task(&task_id, owner, lease, format_override).await?;
         }
 
         Commands::Focus { task_id } => {
-            tasks::focus_task(&task_id, format).await?;
+            tasks::focus_task(&task_id, format_override).await?;
         }
 
         Commands::Pin { task_id } => {
@@ -119,24 +177,27 @@ async fn run(cli: Cli) -> granary::Result<()> {
             tasks::unpin_task(&task_id).await?;
         }
 
-        Commands::Sessions { all } => {
-            sessions::list_sessions(all, format, cli.watch, cli.interval).await?;
+        Commands::Session { action: None, all } => {
+            sessions::list_sessions(all, format_override, cli.watch, cli.interval).await?;
         }
 
-        Commands::Session { action } => {
-            sessions::session(action, format).await?;
+        Commands::Session {
+            action: Some(action),
+            all: _,
+        } => {
+            sessions::session(action, format_override).await?;
         }
 
         Commands::Summary { token_budget } => {
-            summary::summary(token_budget, format, cli.watch, cli.interval).await?;
+            summary::summary(token_budget, format_override, cli.watch, cli.interval).await?;
         }
 
         Commands::Context { include, max_items } => {
-            summary::context(include, max_items, format).await?;
+            summary::context(include, max_items, format_override).await?;
         }
 
         Commands::Checkpoint { action } => {
-            checkpoints::checkpoint(action, format).await?;
+            checkpoints::checkpoint(action, format_override).await?;
         }
 
         Commands::Handoff {
@@ -145,64 +206,110 @@ async fn run(cli: Cli) -> granary::Result<()> {
             constraints,
             acceptance_criteria,
         } => {
-            summary::handoff(&to, &tasks, constraints, acceptance_criteria, format).await?;
+            summary::handoff(
+                &to,
+                &tasks,
+                constraints,
+                acceptance_criteria,
+                format_override,
+            )
+            .await?;
         }
 
         Commands::Apply { stdin } => {
-            batch::apply(stdin, format).await?;
+            batch::apply(stdin, format_override).await?;
         }
 
         Commands::Batch { stdin } => {
-            batch::batch(stdin, format).await?;
+            batch::batch(stdin, format_override).await?;
         }
 
         Commands::Config { action } => {
-            config::config(action, format).await?;
+            config::config(action, format_override).await?;
         }
 
         Commands::Steering { action } => {
-            config::steering(action, format).await?;
+            config::steering(action, format_override).await?;
         }
 
         Commands::Search { query } => {
-            search::search(&query, format, cli.watch, cli.interval).await?;
+            search::search(&query, format_override, cli.watch, cli.interval).await?;
         }
 
-        Commands::Initiatives { action, all } => {
-            initiatives::initiatives(action, all, format, cli.watch, cli.interval).await?;
+        Commands::Initiative { id, action, all } => {
+            initiatives::initiative(id, action, all, format_override, cli.watch, cli.interval)
+                .await?;
         }
 
-        Commands::Initiative { id, action } => {
-            initiatives::initiative(&id, action, format).await?;
+        Commands::Initiate {
+            name_positional,
+            name_flag,
+            description,
+        } => {
+            let name = name_positional.or(name_flag).ok_or_else(|| {
+                GranaryError::InvalidArgument(
+                    "Initiative name is required. Usage: granary initiate <name>".to_string(),
+                )
+            })?;
+            initiate::initiate(&name, description, format_override).await?;
         }
 
         Commands::Update { check, to } => {
-            update::update(check, to).await?;
+            update::update(check, to, format_override).await?;
         }
 
-        Commands::Workers { all } => {
-            workers::list_workers(all, format, cli.watch, cli.interval).await?;
+        Commands::Worker { id, command, all } => {
+            worker::worker(id, command, all, format_override, cli.watch, cli.interval).await?;
         }
 
-        Commands::Worker { command } => {
-            worker::worker(command, format).await?;
-        }
-
-        Commands::Runs {
+        Commands::Run {
+            id,
+            command,
             worker,
             status,
             all,
             limit,
         } => {
-            run::list_runs(worker, status, all, limit, format, cli.watch, cli.interval).await?;
+            run::run(
+                id,
+                command,
+                worker,
+                status,
+                all,
+                limit,
+                format_override,
+                cli.watch,
+                cli.interval,
+            )
+            .await?;
         }
 
-        Commands::Run { command } => {
-            run::run(command, format).await?;
-        }
+        Commands::Events {
+            action,
+            event_type,
+            entity,
+            since,
+            limit,
+        } => match action {
+            Some(granary::cli::args::EventsAction::Drain { before }) => {
+                events::drain_events(&before, format_override).await?;
+            }
+            None => {
+                events::list_events(
+                    event_type,
+                    entity,
+                    since,
+                    limit,
+                    format_override,
+                    cli.watch,
+                    cli.interval,
+                )
+                .await?;
+            }
+        },
 
         Commands::Daemon { command } => {
-            daemon::daemon(command).await?;
+            daemon::daemon(command, format_override).await?;
         }
     }
 

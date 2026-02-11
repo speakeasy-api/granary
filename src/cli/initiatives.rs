@@ -1,29 +1,152 @@
 //! CLI handlers for initiative commands
 
-use crate::cli::args::{InitiativeAction, InitiativesAction};
+use crate::cli::args::{CliOutputFormat, InitiativeAction};
 use crate::cli::watch::{watch_loop, watch_status_line};
 use crate::db;
 use crate::error::Result;
-use crate::models::initiative::{CreateInitiative, UpdateInitiative};
-use crate::output::{Formatter, OutputFormat};
+use crate::models::{CreateInitiative, Initiative, InitiativeSummary, UpdateInitiative};
+use crate::output::{Output, json, prompt, table};
 use crate::services::{self, Workspace};
+use granary_types::{Project, Task};
 use std::time::Duration;
 
-/// Handle initiatives command (list or create)
-pub async fn initiatives(
-    action: Option<InitiativesAction>,
+// =============================================================================
+// Output Types
+// =============================================================================
+
+/// Output for a list of initiatives
+pub struct InitiativesOutput {
+    pub initiatives: Vec<Initiative>,
+}
+
+impl Output for InitiativesOutput {
+    fn to_json(&self) -> String {
+        json::format_initiatives(&self.initiatives)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_initiatives(&self.initiatives)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_initiatives(&self.initiatives)
+    }
+}
+
+/// Output for a single initiative
+pub struct InitiativeOutput {
+    pub initiative: Initiative,
+}
+
+impl Output for InitiativeOutput {
+    fn to_json(&self) -> String {
+        json::format_initiative(&self.initiative)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_initiative(&self.initiative)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_initiative(&self.initiative)
+    }
+}
+
+/// Output for initiative summary
+pub struct InitiativeSummaryOutput {
+    pub summary: InitiativeSummary,
+}
+
+impl Output for InitiativeSummaryOutput {
+    fn to_json(&self) -> String {
+        json::format_initiative_summary(&self.summary)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_initiative_summary(&self.summary)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_initiative_summary(&self.summary)
+    }
+}
+
+/// Output for projects in an initiative (reuses projects output)
+pub struct InitiativeProjectsOutput {
+    pub projects: Vec<Project>,
+}
+
+impl Output for InitiativeProjectsOutput {
+    fn to_json(&self) -> String {
+        json::format_projects(&self.projects)
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_projects(&self.projects)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_projects(&self.projects)
+    }
+}
+
+/// Output for tasks with dependencies
+pub struct InitiativeTasksOutput {
+    pub tasks: Vec<(Task, Vec<String>)>,
+}
+
+impl Output for InitiativeTasksOutput {
+    fn to_json(&self) -> String {
+        json::format_tasks_with_deps(&self.tasks)
+    }
+
+    fn to_prompt(&self) -> String {
+        let refs: Vec<(&Task, &[String])> =
+            self.tasks.iter().map(|(t, d)| (t, d.as_slice())).collect();
+        prompt::format_tasks_with_deps(&refs)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_tasks_with_deps(&self.tasks)
+    }
+}
+
+/// Output for a single task with dependencies
+pub struct InitiativeTaskOutput {
+    pub task: Task,
+    pub blocked_by: Vec<String>,
+}
+
+impl Output for InitiativeTaskOutput {
+    fn to_json(&self) -> String {
+        json::format_task_with_deps(&self.task, self.blocked_by.clone())
+    }
+
+    fn to_prompt(&self) -> String {
+        prompt::format_task_with_deps(&self.task, &self.blocked_by)
+    }
+
+    fn to_text(&self) -> String {
+        table::format_task_with_deps(&self.task, &self.blocked_by)
+    }
+}
+
+/// Handle initiative command (unified: list, create, or manage specific initiative)
+pub async fn initiative(
+    id: Option<String>,
+    action: Option<InitiativeAction>,
     include_archived: bool,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
     watch: bool,
     interval: u64,
 ) -> Result<()> {
-    match action {
-        None => {
-            // List initiatives - support watch mode
+    match (id, action) {
+        // No ID, no action → list initiatives
+        (None, None) => {
             if watch {
                 let interval_duration = Duration::from_secs(interval);
                 watch_loop(interval_duration, || async {
-                    let output = fetch_and_format_initiatives(include_archived, format).await?;
+                    let output = fetch_and_format_initiatives(include_archived, cli_format).await?;
                     Ok(format!(
                         "{}\n{}",
                         watch_status_line(interval_duration),
@@ -32,47 +155,172 @@ pub async fn initiatives(
                 })
                 .await
             } else {
-                let output = fetch_and_format_initiatives(include_archived, format).await?;
+                let output = fetch_and_format_initiatives(include_archived, cli_format).await?;
                 println!("{}", output);
                 Ok(())
             }
         }
-        Some(InitiativesAction::Create {
+
+        // No ID, Create action → create initiative
+        (
+            None,
+            Some(InitiativeAction::Create {
+                name,
+                description,
+                owner,
+                tags,
+            }),
+        ) => create_initiative(&name, description, owner, tags, cli_format).await,
+
+        // No ID, other action → error (need an ID for non-create actions)
+        (None, Some(_)) => Err(crate::error::GranaryError::InvalidArgument(
+            "Initiative ID is required for this action".into(),
+        )),
+
+        // ID provided, no action → show initiative details
+        (Some(id), None) => {
+            let workspace = Workspace::find()?;
+            let pool = workspace.pool().await?;
+            let initiative = services::get_initiative_or_error(&pool, &id).await?;
+            let output = InitiativeOutput { initiative };
+            println!("{}", output.format(cli_format));
+            Ok(())
+        }
+
+        // ID provided, Create action → error (create doesn't take an ID)
+        (Some(_), Some(InitiativeAction::Create { .. })) => {
+            Err(crate::error::GranaryError::InvalidArgument(
+                "Cannot specify an initiative ID with the create action".into(),
+            ))
+        }
+
+        // ID provided, other action → manage specific initiative
+        (Some(id), Some(action)) => {
+            let workspace = Workspace::find()?;
+            let pool = workspace.pool().await?;
+            handle_initiative_action(&pool, &id, action, cli_format).await
+        }
+    }
+}
+
+/// Handle a specific initiative action (requires an ID)
+async fn handle_initiative_action(
+    pool: &sqlx::SqlitePool,
+    id: &str,
+    action: InitiativeAction,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
+    match action {
+        InitiativeAction::Create { .. } => {
+            unreachable!("Create is handled before this function is called")
+        }
+
+        InitiativeAction::Update {
             name,
             description,
             owner,
             tags,
-        }) => create_initiative(&name, description, owner, tags, format).await,
+        } => {
+            let parsed_tags = tags.map(|t| parse_tags(&t));
+
+            let initiative = services::update_initiative(
+                pool,
+                id,
+                UpdateInitiative {
+                    name,
+                    description,
+                    owner,
+                    tags: parsed_tags,
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+            let output = InitiativeOutput { initiative };
+            println!("{}", output.format(cli_format));
+        }
+
+        InitiativeAction::Archive => {
+            let initiative = services::archive_initiative(pool, id).await?;
+            println!("Archived initiative: {}", initiative.id);
+        }
+
+        InitiativeAction::Projects => {
+            let projects = services::get_initiative_projects(pool, id).await?;
+            if projects.is_empty() {
+                println!("No projects in initiative {}", id);
+            } else {
+                let output = InitiativeProjectsOutput { projects };
+                println!("{}", output.format(cli_format));
+            }
+        }
+
+        InitiativeAction::AddProject { project_id } => {
+            services::add_project_to_initiative(pool, id, &project_id).await?;
+            println!("Added project {} to initiative {}", project_id, id);
+        }
+
+        InitiativeAction::RemoveProject { project_id } => {
+            let removed = services::remove_project_from_initiative(pool, id, &project_id).await?;
+            if removed {
+                println!("Removed project {} from initiative {}", project_id, id);
+            } else {
+                println!("Project {} was not in initiative {}", project_id, id);
+            }
+        }
+
+        InitiativeAction::Graph => {
+            print_initiative_dependency_graph(pool, id).await?;
+        }
+
+        InitiativeAction::Next { all } => {
+            let tasks = services::get_next_tasks(pool, id, all).await?;
+
+            if tasks.is_empty() {
+                println!("No actionable tasks in initiative {}", id);
+            } else if all {
+                let tasks_with_deps = services::get_tasks_with_deps(pool, tasks).await?;
+                let output = InitiativeTasksOutput {
+                    tasks: tasks_with_deps,
+                };
+                println!("{}", output.format(cli_format));
+            } else {
+                let (task, blocked_by) = services::get_task_with_deps(pool, &tasks[0].id).await?;
+                let output = InitiativeTaskOutput { task, blocked_by };
+                println!("{}", output.format(cli_format));
+            }
+        }
+
+        InitiativeAction::Summary => {
+            let summary = services::generate_initiative_summary(pool, id, 5).await?;
+            let output = InitiativeSummaryOutput { summary };
+            println!("{}", output.format(cli_format));
+        }
     }
+
+    Ok(())
 }
 
 /// Fetch and format all initiatives as a string
 async fn fetch_and_format_initiatives(
     include_archived: bool,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<String> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
 
     let initiatives = services::list_initiatives(&pool, include_archived).await?;
-    let formatter = Formatter::new(format);
-    Ok(formatter.format_initiatives(&initiatives))
-}
-
-/// List all initiatives
-pub async fn list_initiatives(include_archived: bool, format: OutputFormat) -> Result<()> {
-    let output = fetch_and_format_initiatives(include_archived, format).await?;
-    println!("{}", output);
-    Ok(())
+    let output = InitiativesOutput { initiatives };
+    Ok(output.format(cli_format))
 }
 
 /// Create a new initiative
-pub async fn create_initiative(
+async fn create_initiative(
     name: &str,
     description: Option<String>,
     owner: Option<String>,
     tags: Option<String>,
-    format: OutputFormat,
+    cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
@@ -92,111 +340,8 @@ pub async fn create_initiative(
     )
     .await?;
 
-    let formatter = Formatter::new(format);
-    println!("{}", formatter.format_initiative(&initiative));
-
-    Ok(())
-}
-
-/// Show or manage an initiative
-pub async fn initiative(
-    id: &str,
-    action: Option<InitiativeAction>,
-    format: OutputFormat,
-) -> Result<()> {
-    let workspace = Workspace::find()?;
-    let pool = workspace.pool().await?;
-
-    let formatter = Formatter::new(format);
-
-    match action {
-        None => {
-            // Show initiative details
-            let initiative = services::get_initiative_or_error(&pool, id).await?;
-            println!("{}", formatter.format_initiative(&initiative));
-        }
-
-        Some(InitiativeAction::Update {
-            name,
-            description,
-            owner,
-            tags,
-        }) => {
-            let parsed_tags = tags.map(|t| parse_tags(&t));
-
-            let initiative = services::update_initiative(
-                &pool,
-                id,
-                UpdateInitiative {
-                    name,
-                    description,
-                    owner,
-                    tags: parsed_tags,
-                    ..Default::default()
-                },
-            )
-            .await?;
-
-            println!("{}", formatter.format_initiative(&initiative));
-        }
-
-        Some(InitiativeAction::Archive) => {
-            let initiative = services::archive_initiative(&pool, id).await?;
-            println!("Archived initiative: {}", initiative.id);
-        }
-
-        Some(InitiativeAction::Projects) => {
-            // List projects in initiative
-            let projects = services::get_initiative_projects(&pool, id).await?;
-            if projects.is_empty() {
-                println!("No projects in initiative {}", id);
-            } else {
-                println!("{}", formatter.format_projects(&projects));
-            }
-        }
-
-        Some(InitiativeAction::AddProject { project_id }) => {
-            // Add project to initiative
-            services::add_project_to_initiative(&pool, id, &project_id).await?;
-            println!("Added project {} to initiative {}", project_id, id);
-        }
-
-        Some(InitiativeAction::RemoveProject { project_id }) => {
-            // Remove project from initiative
-            let removed = services::remove_project_from_initiative(&pool, id, &project_id).await?;
-            if removed {
-                println!("Removed project {} from initiative {}", project_id, id);
-            } else {
-                println!("Project {} was not in initiative {}", project_id, id);
-            }
-        }
-
-        Some(InitiativeAction::Graph) => {
-            // Show dependency graph between projects in this initiative
-            print_initiative_dependency_graph(&pool, id).await?;
-        }
-
-        Some(InitiativeAction::Next { all }) => {
-            // Get next actionable task(s) in initiative
-            let tasks = services::get_next_tasks(&pool, id, all).await?;
-
-            if tasks.is_empty() {
-                println!("No actionable tasks in initiative {}", id);
-            } else if all {
-                let tasks_with_deps = services::get_tasks_with_deps(&pool, tasks).await?;
-                println!("{}", formatter.format_tasks_with_deps(&tasks_with_deps));
-            } else {
-                let (task, blocked_by) = services::get_task_with_deps(&pool, &tasks[0].id).await?;
-                println!("{}", formatter.format_task_with_deps(&task, blocked_by));
-            }
-        }
-
-        Some(InitiativeAction::Summary) => {
-            // Generate and display initiative summary
-            let summary = services::generate_initiative_summary(&pool, id, 5).await?;
-            println!("{}", formatter.format_initiative_summary(&summary));
-        }
-    }
+    let output = InitiativeOutput { initiative };
+    println!("{}", output.format(cli_format));
 
     Ok(())
 }

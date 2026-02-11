@@ -40,6 +40,18 @@ fn find_granary_binary() -> Result<PathBuf, String> {
     ))
 }
 
+/// Canonicalize the temp dir path to avoid macOS symlink mismatches
+/// (/var/folders/... vs /private/var/folders/...) which cause path
+/// comparisons inside granary to fail.
+fn canonical_temp_dir() -> (TempDir, std::path::PathBuf) {
+    let tmp = TempDir::new().expect("Failed to create temp home dir");
+    let canonical = tmp
+        .path()
+        .canonicalize()
+        .expect("Failed to canonicalize temp dir");
+    (tmp, canonical)
+}
+
 /// Test that first run injects instructions into existing global agent directories.
 #[test]
 fn test_first_run_injects_into_global_dirs() {
@@ -52,23 +64,23 @@ fn test_first_run_injects_into_global_dirs() {
     };
 
     // Create a temporary home directory
-    let temp_home = TempDir::new().expect("Failed to create temp home dir");
+    let (_temp_home, temp_home_path) = canonical_temp_dir();
 
     // Create some global agent directories to simulate installed agents
-    let claude_dir = temp_home.path().join(".claude");
+    let claude_dir = temp_home_path.join(".claude");
     fs::create_dir_all(&claude_dir).expect("Failed to create .claude dir");
 
-    let codex_dir = temp_home.path().join(".codex");
+    let codex_dir = temp_home_path.join(".codex");
     fs::create_dir_all(&codex_dir).expect("Failed to create .codex dir");
 
     // Create a workspace directory
-    let workspace_dir = temp_home.path().join("workspace");
+    let workspace_dir = temp_home_path.join("workspace");
     fs::create_dir_all(&workspace_dir).expect("Failed to create workspace dir");
 
     // Run granary init with the temp home
     let output = Command::new(&granary_bin)
         .arg("init")
-        .env("HOME", temp_home.path())
+        .env("HOME", &temp_home_path)
         .current_dir(&workspace_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -119,24 +131,24 @@ fn test_subsequent_run_skips_global_injection() {
     };
 
     // Create a temporary home directory
-    let temp_home = TempDir::new().expect("Failed to create temp home dir");
+    let (_temp_home, temp_home_path) = canonical_temp_dir();
 
     // Create a .granary directory to simulate existing installation
-    let granary_dir = temp_home.path().join(".granary");
+    let granary_dir = temp_home_path.join(".granary");
     fs::create_dir_all(&granary_dir).expect("Failed to create .granary dir");
 
     // Create a global agent directory
-    let claude_dir = temp_home.path().join(".claude");
+    let claude_dir = temp_home_path.join(".claude");
     fs::create_dir_all(&claude_dir).expect("Failed to create .claude dir");
 
     // Create a workspace directory
-    let workspace_dir = temp_home.path().join("workspace");
+    let workspace_dir = temp_home_path.join("workspace");
     fs::create_dir_all(&workspace_dir).expect("Failed to create workspace dir");
 
     // Run granary init
     let output = Command::new(&granary_bin)
         .arg("init")
-        .env("HOME", temp_home.path())
+        .env("HOME", &temp_home_path)
         .current_dir(&workspace_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -166,16 +178,16 @@ fn test_first_run_with_no_global_dirs() {
     };
 
     // Create a temporary home directory with no agent directories
-    let temp_home = TempDir::new().expect("Failed to create temp home dir");
+    let (_temp_home, temp_home_path) = canonical_temp_dir();
 
     // Create a workspace directory
-    let workspace_dir = temp_home.path().join("workspace");
+    let workspace_dir = temp_home_path.join("workspace");
     fs::create_dir_all(&workspace_dir).expect("Failed to create workspace dir");
 
     // Run granary init
     let output = Command::new(&granary_bin)
         .arg("init")
-        .env("HOME", temp_home.path())
+        .env("HOME", &temp_home_path)
         .current_dir(&workspace_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -202,23 +214,23 @@ fn test_first_run_injects_into_existing_files() {
     };
 
     // Create a temporary home directory
-    let temp_home = TempDir::new().expect("Failed to create temp home dir");
+    let (_temp_home, temp_home_path) = canonical_temp_dir();
 
     // Create a .claude directory with existing CLAUDE.md
-    let claude_dir = temp_home.path().join(".claude");
+    let claude_dir = temp_home_path.join(".claude");
     fs::create_dir_all(&claude_dir).expect("Failed to create .claude dir");
     let claude_md = claude_dir.join("CLAUDE.md");
     let original_content = "# My Custom Instructions\n\nDo something important.\n";
     fs::write(&claude_md, original_content).expect("Failed to write CLAUDE.md");
 
     // Create a workspace directory
-    let workspace_dir = temp_home.path().join("workspace");
+    let workspace_dir = temp_home_path.join("workspace");
     fs::create_dir_all(&workspace_dir).expect("Failed to create workspace dir");
 
     // Run granary init
     let output = Command::new(&granary_bin)
         .arg("init")
-        .env("HOME", temp_home.path())
+        .env("HOME", &temp_home_path)
         .current_dir(&workspace_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -256,23 +268,23 @@ fn test_first_run_skips_files_with_existing_instruction() {
     };
 
     // Create a temporary home directory
-    let temp_home = TempDir::new().expect("Failed to create temp home dir");
+    let (_temp_home, temp_home_path) = canonical_temp_dir();
 
     // Create a .claude directory with CLAUDE.md that already has granary instruction
-    let claude_dir = temp_home.path().join(".claude");
+    let claude_dir = temp_home_path.join(".claude");
     fs::create_dir_all(&claude_dir).expect("Failed to create .claude dir");
     let claude_md = claude_dir.join("CLAUDE.md");
     let existing_content = "# Instructions\n\nUse granary to plan your work.\n";
     fs::write(&claude_md, existing_content).expect("Failed to write CLAUDE.md");
 
     // Create a workspace directory
-    let workspace_dir = temp_home.path().join("workspace");
+    let workspace_dir = temp_home_path.join("workspace");
     fs::create_dir_all(&workspace_dir).expect("Failed to create workspace dir");
 
     // Run granary init
     let output = Command::new(&granary_bin)
         .arg("init")
-        .env("HOME", temp_home.path())
+        .env("HOME", &temp_home_path)
         .current_dir(&workspace_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

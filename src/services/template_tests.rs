@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::models::event::Event;
+    use crate::models::Event;
     use crate::services::template::{substitute, substitute_all};
 
     /// Helper to create a test event with custom payload

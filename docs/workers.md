@@ -72,13 +72,13 @@ granary workers
 granary workers --all
 
 # Check worker status
-granary worker status worker-abc12345
+granary worker worker-abc12345 status
 
 # View worker logs
-granary worker logs worker-abc12345
+granary worker worker-abc12345 logs
 
 # Follow logs in real-time
-granary worker logs worker-abc12345 -f
+granary worker worker-abc12345 logs --follow
 ```
 
 ### 4. Monitor Runs
@@ -97,10 +97,10 @@ granary runs --worker worker-abc12345
 granary runs --status failed
 
 # Check run details
-granary run status run-xyz12345
+granary run run-xyz12345 status
 
 # View run logs
-granary run logs run-xyz12345
+granary run run-xyz12345 logs
 ```
 
 ## CLI Reference
@@ -144,15 +144,15 @@ granary worker start \
 granary worker start --runner claude --on task.unblocked --concurrency 4
 ```
 
-#### `granary worker status <WORKER_ID>`
+#### `granary worker <WORKER_ID> status`
 
 Show worker status and run statistics.
 
 ```bash
-granary worker status worker-abc12345
+granary worker worker-abc12345 status
 ```
 
-#### `granary worker logs <WORKER_ID>`
+#### `granary worker <WORKER_ID> logs`
 
 View worker logs.
 
@@ -160,10 +160,10 @@ View worker logs.
 
 | Option | Description |
 |--------|-------------|
-| `-f`, `--follow` | Follow log output (like `tail -f`) |
+| `--follow` | Follow log output (like `tail -f`) |
 | `-n`, `--lines <N>` | Number of lines to show (default: 50) |
 
-#### `granary worker stop <WORKER_ID>`
+#### `granary worker <WORKER_ID> stop`
 
 Stop a worker.
 
@@ -189,11 +189,11 @@ List all workers.
 
 ### Run Commands
 
-#### `granary run status <RUN_ID>`
+#### `granary run <RUN_ID> status`
 
 Show run status and details.
 
-#### `granary run logs <RUN_ID>`
+#### `granary run <RUN_ID> logs`
 
 View run logs.
 
@@ -201,18 +201,18 @@ View run logs.
 
 | Option | Description |
 |--------|-------------|
-| `-f`, `--follow` | Follow log output |
+| `--follow` | Follow log output |
 | `-n`, `--lines <N>` | Number of lines to show (default: 100) |
 
-#### `granary run stop <RUN_ID>`
+#### `granary run <RUN_ID> stop`
 
 Stop a running run (sends SIGTERM, marks as cancelled).
 
-#### `granary run pause <RUN_ID>`
+#### `granary run <RUN_ID> pause`
 
 Pause a running run (sends SIGSTOP).
 
-#### `granary run resume <RUN_ID>`
+#### `granary run <RUN_ID> resume`
 
 Resume a paused run (sends SIGCONT).
 
@@ -446,10 +446,10 @@ Each run's stdout and stderr are captured to its log file:
 
 ```bash
 # View run output
-granary run logs run-abc12345
+granary run run-abc12345 logs
 
 # Follow in real-time
-granary run logs run-abc12345 -f
+granary run run-abc12345 logs --follow
 ```
 
 ## Graceful Shutdown
@@ -559,14 +559,14 @@ granary worker prune
 
 ### Events not being processed
 
-1. Check worker status: `granary worker status <id>`
+1. Check worker status: `granary worker <id> status`
 2. Verify event type matches: `--on task.unblocked`
 3. Check filters aren't too restrictive
 4. Look at worker logs for errors
 
 ### Runs failing immediately
 
-1. Check run logs: `granary run logs <run_id>`
+1. Check run logs: `granary run <run_id> logs`
 2. Verify the command exists and is executable
 3. Check environment variables are set correctly
 
@@ -575,7 +575,7 @@ granary worker prune
 Reduce concurrency to limit parallel processes:
 
 ```bash
-granary worker stop <worker_id>
+granary worker <worker_id> stop
 granary worker start --runner <name> --on <event> --concurrency 1
 ```
 

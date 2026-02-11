@@ -8,7 +8,7 @@ use crate::error::Result;
 use std::path::{Path, PathBuf};
 
 /// The granary instruction to inject into agent files.
-const GRANARY_INSTRUCTION: &str = "When user asks \"use granary\" run `granary` command first";
+const GRANARY_INSTRUCTION: &str = r#"IMPORTANT: when user requests to "use granary", run `granary` command before performing any other task."#;
 
 /// Result of attempting to inject a granary instruction into an agent file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,22 +246,7 @@ pub fn find_workspace_agent_files(root: &Path) -> Result<Vec<AgentFile>> {
 /// Returns an error if the file cannot be read.
 pub fn contains_granary_instruction(path: &Path) -> Result<bool> {
     let content = std::fs::read_to_string(path)?;
-
-    // Check for common granary instruction patterns
-    let patterns = [
-        "use granary to plan",
-        "granary plan",
-        "IMPORTANT: use granary",
-        "**IMPORTANT**: use granary",
-    ];
-
-    for pattern in patterns {
-        if content.to_lowercase().contains(&pattern.to_lowercase()) {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
+    Ok(content.to_lowercase().contains("use granary"))
 }
 
 /// Determines the file format based on the file extension.
@@ -925,7 +910,7 @@ mod tests {
         assert_eq!(result, InjectionResult::Injected);
 
         let content = fs::read_to_string(&path).unwrap();
-        assert!(content.contains("# When user asks")); // YAML comment format
+        assert!(content.contains("# IMPORTANT:")); // YAML comment format
     }
 
     #[test]
@@ -1009,7 +994,8 @@ mod tests {
         assert_eq!(result, InjectionResult::FileCreated);
 
         let content = fs::read_to_string(&path).unwrap();
-        assert!(content.starts_with("# ")); // YAML comment format
+        assert!(content.starts_with("# IMPORTANT:")); // YAML comment format
+        assert!(content.contains("use granary"));
     }
 
     #[test]
