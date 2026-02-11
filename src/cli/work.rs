@@ -194,10 +194,6 @@ async fn work_start(
 
     // 5. Check if task is in draft status
     if task.status == "draft" {
-        eprintln!(
-            "Task is in draft status. Use 'granary task {} ready' first. Exiting.",
-            task_id
-        );
         return Err(GranaryError::Conflict(format!(
             "Task {} is in draft status",
             task_id
@@ -377,33 +373,6 @@ fn format_work_context(task: &Task, project: &Project, steering: &[SteeringInfo]
         output.push_str("\n\n");
     }
 
-    // Extract files to modify from description if present
-    // (This is a heuristic - if the description contains file paths)
-    if let Some(ref description) = task.description
-        && !description.contains("**Files to")
-    {
-        // Try to extract file paths from description
-        let files: Vec<&str> = description
-            .lines()
-            .filter(|line| {
-                line.contains(".rs")
-                    || line.contains(".ts")
-                    || line.contains(".js")
-                    || line.contains(".py")
-                    || line.contains("src/")
-                    || line.contains("lib/")
-            })
-            .collect();
-
-        if !files.is_empty() {
-            output.push_str("**Files to modify:**\n");
-            for file in files {
-                output.push_str(&format!("- {}\n", file.trim_start_matches("- ").trim()));
-            }
-            output.push('\n');
-        }
-    }
-
     // Steering files
     if !steering.is_empty() {
         output.push_str("## Steering\n\n");
@@ -435,7 +404,7 @@ fn format_work_context(task: &Task, project: &Project, steering: &[SteeringInfo]
     }
 
     // Instructions for completion
-    output.push_str("## When Done\n");
+    output.push_str("CRITICAL:\n- when done\n");
     output.push_str("```bash\n");
     output.push_str(&format!(
         "granary work done {} \"summary of changes\"\n",
@@ -443,7 +412,7 @@ fn format_work_context(task: &Task, project: &Project, steering: &[SteeringInfo]
     ));
     output.push_str("```\n\n");
 
-    output.push_str("## If Blocked\n");
+    output.push_str("- if blocked\n");
     output.push_str("```bash\n");
     output.push_str(&format!(
         "granary work block {} \"reason for blocking\"\n",

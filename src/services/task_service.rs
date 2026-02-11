@@ -455,6 +455,7 @@ pub async fn release_task(pool: &SqlitePool, id: &str) -> Result<Task> {
     task.claim_owner = None;
     task.claim_claimed_at = None;
     task.claim_lease_expires_at = None;
+    task.status = TaskStatus::Todo.to_string();
 
     db::tasks::update(pool, &task).await?;
 
