@@ -181,7 +181,6 @@ pub async fn worker(
             filters,
             detached,
             concurrency,
-            poll_cooldown,
         }) => {
             start_worker(StartWorkerArgs {
                 runner_name: runner,
@@ -191,7 +190,6 @@ pub async fn worker(
                 filters,
                 detached,
                 concurrency,
-                poll_cooldown_secs: poll_cooldown,
                 cli_format,
             })
             .await
@@ -233,7 +231,6 @@ struct StartWorkerArgs {
     filters: Vec<String>,
     detached: bool,
     concurrency: u32,
-    poll_cooldown_secs: i64,
     cli_format: Option<CliOutputFormat>,
 }
 
@@ -247,7 +244,6 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
         filters,
         detached,
         concurrency,
-        poll_cooldown_secs,
         cli_format,
     } = args;
 
@@ -322,7 +318,6 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
         concurrency: final_concurrency as i32,
         instance_path,
         attach: !detached,
-        poll_cooldown_secs: Some(poll_cooldown_secs),
     };
 
     let worker = client.start_worker(req).await?;

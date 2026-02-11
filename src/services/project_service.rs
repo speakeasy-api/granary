@@ -41,25 +41,10 @@ pub async fn create_project(pool: &SqlitePool, input: CreateProject) -> Result<P
         created_at: now.clone(),
         updated_at: now,
         version: 1,
+        last_edited_by: None,
     };
 
     db::projects::create(pool, &project).await?;
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::ProjectCreated,
-            entity_type: EntityType::Project,
-            entity_id: project.id.clone(),
-            actor: None,
-            session_id: None,
-            payload: serde_json::json!({
-                "name": project.name,
-            }),
-        },
-    )
-    .await?;
 
     Ok(project)
 }
@@ -106,6 +91,9 @@ pub async fn update_project(
         project.steering_refs = Some(serde_json::to_string(&refs)?);
     }
 
+    // Set actor for trigger-based events (no actor available at this level)
+    project.last_edited_by = None;
+
     let updated = db::projects::update(pool, &project).await?;
     if !updated {
         return Err(GranaryError::VersionMismatch {
@@ -113,20 +101,6 @@ pub async fn update_project(
             found: project.version + 1,
         });
     }
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::ProjectUpdated,
-            entity_type: EntityType::Project,
-            entity_id: project.id.clone(),
-            actor: None,
-            session_id: None,
-            payload: serde_json::json!({}),
-        },
-    )
-    .await?;
 
     // Refetch to get updated version
     get_project(pool, id).await
@@ -145,19 +119,48 @@ pub async fn archive_project(pool: &SqlitePool, id: &str) -> Result<Project> {
 
     db::projects::archive(pool, id).await?;
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::ProjectArchived,
-            entity_type: EntityType::Project,
-            entity_id: id.to_string(),
-            actor: None,
-            session_id: None,
-            payload: serde_json::json!({}),
-        },
-    )
-    .await?;
+    get_project(pool, id).await
+}
+
+/// Complete a project (mark as done)
+pub async fn complete_project(
+    pool: &SqlitePool,
+    id: &str,
+    complete_tasks: bool,
+) -> Result<Project> {
+    let project = get_project(pool, id).await?;
+
+    if project.status == ProjectStatus::Completed.as_str() {
+        return Err(GranaryError::Conflict(format!(
+            "Project {} is already completed",
+            id
+        )));
+    }
+
+    if project.status == ProjectStatus::Archived.as_str() {
+        return Err(GranaryError::Conflict(format!(
+            "Project {} is archived. Unarchive it first.",
+            id
+        )));
+    }
+
+    db::projects::complete(pool, id, complete_tasks).await?;
+
+    get_project(pool, id).await
+}
+
+/// Unarchive a project (restore to active)
+pub async fn unarchive_project(pool: &SqlitePool, id: &str) -> Result<Project> {
+    let project = get_project(pool, id).await?;
+
+    if project.status != ProjectStatus::Archived.as_str() {
+        return Err(GranaryError::Conflict(format!(
+            "Project {} is not archived (status: {})",
+            id, project.status
+        )));
+    }
+
+    db::projects::unarchive(pool, id).await?;
 
     get_project(pool, id).await
 }

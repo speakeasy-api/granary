@@ -40,7 +40,6 @@ use crate::models::{UpdateWorkerStatus, Worker, WorkerStatus};
 use crate::services::event_poller::{EventPoller, EventPollerConfig, create_poller_for_worker};
 
 use crate::services::global_config;
-use crate::services::polled_events::PolledEventEmitter;
 use crate::services::runner::{RunnerHandle, spawn_runner};
 use crate::services::template;
 
@@ -102,8 +101,6 @@ pub struct WorkerRuntime {
     config: WorkerRuntimeConfig,
     /// Log directory path
     log_dir: PathBuf,
-    /// Polled event emitter for task.next/project.next (None for regular events)
-    polled_emitter: Option<PolledEventEmitter>,
 }
 
 impl WorkerRuntime {
@@ -137,14 +134,6 @@ impl WorkerRuntime {
                 .join(&worker.id)
         });
 
-        // Create polled event emitter if this is a polled event type
-        let polled_emitter =
-            if worker.event_type == "task.next" || worker.event_type == "project.next" {
-                Some(PolledEventEmitter::new(worker.poll_cooldown_secs))
-            } else {
-                None
-            };
-
         Ok(Self {
             worker,
             global_pool,
@@ -154,7 +143,6 @@ impl WorkerRuntime {
             shutdown_rx,
             config,
             log_dir,
-            polled_emitter,
         })
     }
 
@@ -216,17 +204,7 @@ impl WorkerRuntime {
 
     /// Poll for new events and handle them.
     async fn poll_and_handle_events(&mut self) -> Result<()> {
-        let events = if let Some(ref mut emitter) = self.polled_emitter {
-            // Use polled event emitter for task.next/project.next
-            match self.worker.event_type.as_str() {
-                "task.next" => emitter.poll_task_next(&self.workspace_pool, None).await?,
-                "project.next" => emitter.poll_project_next(&self.workspace_pool).await?,
-                _ => vec![],
-            }
-        } else {
-            // Use regular event poller for other event types
-            self.poller.poll().await?
-        };
+        let events = self.poller.poll().await?;
 
         for event in events {
             if let Err(e) = self.handle_event(event).await {
@@ -292,10 +270,8 @@ impl WorkerRuntime {
         // Track the active run
         self.active_runs.insert(run.id.clone(), handle);
 
-        // Acknowledge the event - skip for synthetic polled events
-        if event.id != 0 {
-            self.poller.acknowledge(event.id).await?;
-        }
+        // Acknowledge the event
+        self.poller.acknowledge(event.id).await?;
 
         eprintln!(
             "[worker:{}] Started run {} for event {} ({})",

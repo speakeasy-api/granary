@@ -589,23 +589,6 @@ async fn create_comment(
 
     db::comments::create(pool, &comment).await?;
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::CommentCreated,
-            entity_type: EntityType::Comment,
-            entity_id: comment.id.clone(),
-            actor: comment.author.clone(),
-            session_id: None,
-            payload: serde_json::json!({
-                "kind": comment.kind,
-                "parent_id": comment.parent_id,
-            }),
-        },
-    )
-    .await?;
-
     Ok(comment)
 }
 

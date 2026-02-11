@@ -15,8 +15,8 @@ pub mod projects {
         sqlx::query(
             r#"
             INSERT INTO projects (id, slug, name, description, owner, status, tags,
-                default_session_policy, steering_refs, created_at, updated_at, version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                default_session_policy, steering_refs, created_at, updated_at, version, last_edited_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&project.id)
@@ -31,6 +31,7 @@ pub mod projects {
         .bind(&project.created_at)
         .bind(&project.updated_at)
         .bind(project.version)
+        .bind(&project.last_edited_by)
         .execute(pool)
         .await?;
         Ok(())
@@ -64,7 +65,8 @@ pub mod projects {
             r#"
             UPDATE projects
             SET name = ?, description = ?, owner = ?, status = ?, tags = ?,
-                default_session_policy = ?, steering_refs = ?, updated_at = ?, version = version + 1
+                default_session_policy = ?, steering_refs = ?, updated_at = ?, version = version + 1,
+                last_edited_by = ?
             WHERE id = ? AND version = ?
             "#,
         )
@@ -76,6 +78,7 @@ pub mod projects {
         .bind(&project.default_session_policy)
         .bind(&project.steering_refs)
         .bind(chrono::Utc::now().to_rfc3339())
+        .bind(&project.last_edited_by)
         .bind(&project.id)
         .bind(project.version)
         .execute(pool)
@@ -84,40 +87,52 @@ pub mod projects {
     }
 
     pub async fn archive(pool: &SqlitePool, id: &str) -> Result<bool> {
-        let result =
-            sqlx::query("UPDATE projects SET status = 'archived', updated_at = ? WHERE id = ?")
-                .bind(chrono::Utc::now().to_rfc3339())
-                .bind(id)
-                .execute(pool)
-                .await?;
+        let result = sqlx::query(
+            "UPDATE projects SET status = 'archived', updated_at = ?, last_edited_by = NULL WHERE id = ?",
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(pool)
+        .await?;
         Ok(result.rows_affected() > 0)
     }
 
-    /// List projects that have at least one available (next) task.
-    /// A project is 'available' if it has tasks that are:
-    /// - Status is 'todo' or 'in_progress'
-    /// - Not blocked (blocked_reason IS NULL)
-    /// - All dependencies are done
-    pub async fn list_with_available_tasks(pool: &SqlitePool) -> Result<Vec<Project>> {
-        let projects = sqlx::query_as::<_, Project>(
-            r#"
-            SELECT DISTINCT p.* FROM projects p
-            INNER JOIN tasks t ON t.project_id = p.id
-            WHERE p.status = 'active'
-              AND t.status IN ('todo', 'in_progress')
-              AND t.blocked_reason IS NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM task_dependencies td
-                  JOIN tasks dep ON dep.id = td.depends_on_task_id
-                  WHERE td.task_id = t.id
-                    AND dep.status != 'done'
-              )
-            ORDER BY p.name ASC
-            "#,
+    pub async fn complete(pool: &SqlitePool, id: &str, complete_tasks: bool) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut tx = pool.begin().await?;
+
+        if complete_tasks {
+            sqlx::query(
+                "UPDATE tasks SET status = 'done', completed_at = ?, updated_at = ?, last_edited_by = NULL, version = version + 1 WHERE project_id = ? AND status != 'done'",
+            )
+            .bind(&now)
+            .bind(&now)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        let result = sqlx::query(
+            "UPDATE projects SET status = 'completed', updated_at = ?, last_edited_by = NULL WHERE id = ?",
         )
-        .fetch_all(pool)
+        .bind(&now)
+        .bind(id)
+        .execute(&mut *tx)
         .await?;
-        Ok(projects)
+
+        tx.commit().await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn unarchive(pool: &SqlitePool, id: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE projects SET status = 'active', updated_at = ?, last_edited_by = NULL WHERE id = ?",
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 }
 
@@ -373,8 +388,8 @@ pub mod tasks {
             INSERT INTO tasks (id, project_id, task_number, parent_task_id, title, description,
                 status, priority, owner, tags, blocked_reason, started_at, completed_at, due_at,
                 claim_owner, claim_claimed_at, claim_lease_expires_at, pinned, focus_weight,
-                created_at, updated_at, version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, version, last_edited_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&task.id)
@@ -399,6 +414,7 @@ pub mod tasks {
         .bind(&task.created_at)
         .bind(&task.updated_at)
         .bind(task.version)
+        .bind(&task.last_edited_by)
         .execute(pool)
         .await?;
         Ok(())
@@ -481,7 +497,8 @@ pub mod tasks {
             SET title = ?, description = ?, status = ?, priority = ?, owner = ?, tags = ?,
                 blocked_reason = ?, started_at = ?, completed_at = ?, due_at = ?,
                 claim_owner = ?, claim_claimed_at = ?, claim_lease_expires_at = ?,
-                pinned = ?, focus_weight = ?, updated_at = ?, version = version + 1
+                pinned = ?, focus_weight = ?, updated_at = ?, version = version + 1,
+                last_edited_by = ?
             WHERE id = ? AND version = ?
             "#,
         )
@@ -501,6 +518,7 @@ pub mod tasks {
         .bind(task.pinned)
         .bind(task.focus_weight)
         .bind(chrono::Utc::now().to_rfc3339())
+        .bind(&task.last_edited_by)
         .bind(&task.id)
         .bind(task.version)
         .execute(pool)
@@ -643,7 +661,7 @@ pub mod tasks {
         let result = sqlx::query(
             r#"
             UPDATE tasks
-            SET status = 'todo', updated_at = ?, version = version + 1
+            SET status = 'todo', updated_at = ?, last_edited_by = NULL, version = version + 1
             WHERE project_id = ? AND status = 'draft'
             "#,
         )
@@ -972,8 +990,8 @@ pub mod sessions {
         sqlx::query(
             r#"
             INSERT INTO sessions (id, name, owner, mode, focus_task_id, variables,
-                created_at, updated_at, closed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, closed_at, last_edited_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&session.id)
@@ -985,6 +1003,7 @@ pub mod sessions {
         .bind(&session.created_at)
         .bind(&session.updated_at)
         .bind(&session.closed_at)
+        .bind(&session.last_edited_by)
         .execute(pool)
         .await?;
         Ok(())
@@ -1018,7 +1037,7 @@ pub mod sessions {
             r#"
             UPDATE sessions
             SET name = ?, owner = ?, mode = ?, focus_task_id = ?, variables = ?,
-                updated_at = ?, closed_at = ?
+                updated_at = ?, closed_at = ?, last_edited_by = ?
             WHERE id = ?
             "#,
         )
@@ -1029,6 +1048,7 @@ pub mod sessions {
         .bind(&session.variables)
         .bind(chrono::Utc::now().to_rfc3339())
         .bind(&session.closed_at)
+        .bind(&session.last_edited_by)
         .bind(&session.id)
         .execute(pool)
         .await?;
@@ -1038,7 +1058,7 @@ pub mod sessions {
     pub async fn close(pool: &SqlitePool, id: &str) -> Result<bool> {
         let now = chrono::Utc::now().to_rfc3339();
         let result = sqlx::query(
-            "UPDATE sessions SET closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL",
+            "UPDATE sessions SET closed_at = ?, updated_at = ?, last_edited_by = NULL WHERE id = ? AND closed_at IS NULL",
         )
         .bind(&now)
         .bind(&now)
@@ -1114,30 +1134,6 @@ pub mod sessions {
 /// Database operations for events
 pub mod events {
     use super::*;
-
-    pub async fn create(pool: &SqlitePool, event: &CreateEvent) -> Result<i64> {
-        let now = chrono::Utc::now().to_rfc3339();
-        let payload = serde_json::to_string(&event.payload)?;
-
-        let id = sqlx::query_scalar::<_, i64>(
-            r#"
-            INSERT INTO events (event_type, entity_type, entity_id, actor, session_id, payload, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            RETURNING id
-            "#,
-        )
-        .bind(event.event_type.as_str())
-        .bind(event.entity_type.as_str())
-        .bind(&event.entity_id)
-        .bind(&event.actor)
-        .bind(&event.session_id)
-        .bind(&payload)
-        .bind(&now)
-        .fetch_one(pool)
-        .await?;
-
-        Ok(id)
-    }
 
     pub async fn list_by_entity(
         pool: &SqlitePool,
@@ -1355,44 +1351,30 @@ pub mod event_consumptions {
     ) -> Result<Option<Event>> {
         let now = chrono::Utc::now().to_rfc3339();
 
-        // Build the query dynamically based on filters
-        let mut query = String::from(
+        // Step 1: Find the next unclaimed event
+        let mut select_query = String::from(
             r#"
-            WITH claimed AS (
-                INSERT INTO event_consumptions (consumer_id, event_id, consumed_at)
-                SELECT ?, e.id, ?
-                FROM events e
-                WHERE e.id > ?
-                  AND e.event_type = ?
-                  AND e.created_at >= ?
-                  AND NOT EXISTS (
-                    SELECT 1 FROM event_consumptions ec
-                    WHERE ec.consumer_id = ? AND ec.event_id = e.id
-                  )
+            SELECT e.* FROM events e
+            WHERE e.id > ?
+              AND e.event_type = ?
+              AND e.created_at >= ?
+              AND NOT EXISTS (
+                SELECT 1 FROM event_consumptions ec
+                WHERE ec.consumer_id = ? AND ec.event_id = e.id
+              )
             "#,
         );
 
         // Append dynamic filter clauses
         for (sql_frag, _, _) in filter_clauses {
-            query.push_str("  AND ");
-            query.push_str(sql_frag);
-            query.push('\n');
+            select_query.push_str("  AND ");
+            select_query.push_str(sql_frag);
+            select_query.push('\n');
         }
 
-        query.push_str(
-            r#"
-                ORDER BY e.id ASC
-                LIMIT 1
-                RETURNING event_id
-            )
-            SELECT e.* FROM events e JOIN claimed c ON e.id = c.event_id
-            "#,
-        );
+        select_query.push_str("ORDER BY e.id ASC LIMIT 1");
 
-        // Bind parameters in order
-        let mut q = sqlx::query_as::<_, Event>(&query)
-            .bind(consumer_id)
-            .bind(&now)
+        let mut q = sqlx::query_as::<_, Event>(&select_query)
             .bind(last_seen_id)
             .bind(event_type)
             .bind(started_at)
@@ -1403,8 +1385,27 @@ pub mod event_consumptions {
             q = q.bind(json_path).bind(value);
         }
 
-        let event = q.fetch_optional(pool).await?;
-        Ok(event)
+        let event = match q.fetch_optional(pool).await? {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+
+        // Step 2: Try to claim it (INSERT OR IGNORE to handle races)
+        let claimed = sqlx::query(
+            "INSERT OR IGNORE INTO event_consumptions (consumer_id, event_id, consumed_at) VALUES (?, ?, ?)",
+        )
+        .bind(consumer_id)
+        .bind(event.id)
+        .bind(&now)
+        .execute(pool)
+        .await?;
+
+        if claimed.rows_affected() == 0 {
+            // Another consumer claimed it first; skip
+            return Ok(None);
+        }
+
+        Ok(Some(event))
     }
 
     /// Delete consumption records for events before a given event ID
@@ -1989,8 +1990,8 @@ pub mod workers {
         sqlx::query(
             r#"
             INSERT INTO workers (id, runner_name, command, args, event_type, filters,
-                concurrency, instance_path, status, poll_cooldown_secs, detached, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+                concurrency, instance_path, status, detached, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
             "#,
         )
         .bind(&id)
@@ -2001,7 +2002,6 @@ pub mod workers {
         .bind(&filters_json)
         .bind(input.concurrency)
         .bind(&input.instance_path)
-        .bind(input.poll_cooldown_secs)
         .bind(input.detached)
         .bind(&now)
         .bind(&now)
@@ -2020,7 +2020,7 @@ pub mod workers {
     const WORKER_COLUMNS: &str = r#"
         id, runner_name, command, args, event_type, filters, concurrency,
         instance_path, status, error_message, pid, detached, created_at,
-        updated_at, stopped_at, poll_cooldown_secs, last_event_id
+        updated_at, stopped_at, last_event_id
     "#;
 
     /// Get a worker by ID

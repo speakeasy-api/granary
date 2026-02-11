@@ -67,6 +67,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             version: 1,
+            last_edited_by: None,
         }
     }
 
@@ -84,6 +85,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             version: 1,
+            last_edited_by: None,
         }
     }
 
@@ -138,6 +140,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             closed_at: None,
+            last_edited_by: None,
         }
     }
 
@@ -182,7 +185,6 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             stopped_at: None,
-            poll_cooldown_secs: 300,
             last_event_id: 0,
         }
     }

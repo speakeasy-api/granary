@@ -10,22 +10,19 @@ pub enum EventType {
     // Project events
     ProjectCreated,
     ProjectUpdated,
+    ProjectCompleted,
     ProjectArchived,
+    ProjectUnarchived,
 
     // Task events
     TaskCreated,
     TaskUpdated,
-    TaskStatusChanged,
     TaskStarted,
     TaskCompleted,
     TaskBlocked,
     TaskUnblocked,
     TaskClaimed,
     TaskReleased,
-
-    // Polled events (not persisted, generated on-demand)
-    TaskNext,    // Emitted when a task becomes available for work
-    ProjectNext, // Emitted when a project becomes available for work
 
     // Dependency events
     DependencyAdded,
@@ -60,18 +57,17 @@ impl EventType {
         match self {
             EventType::ProjectCreated => "project.created".to_string(),
             EventType::ProjectUpdated => "project.updated".to_string(),
+            EventType::ProjectCompleted => "project.completed".to_string(),
             EventType::ProjectArchived => "project.archived".to_string(),
+            EventType::ProjectUnarchived => "project.unarchived".to_string(),
             EventType::TaskCreated => "task.created".to_string(),
             EventType::TaskUpdated => "task.updated".to_string(),
-            EventType::TaskStatusChanged => "task.status_changed".to_string(),
             EventType::TaskStarted => "task.started".to_string(),
             EventType::TaskCompleted => "task.completed".to_string(),
             EventType::TaskBlocked => "task.blocked".to_string(),
             EventType::TaskUnblocked => "task.unblocked".to_string(),
             EventType::TaskClaimed => "task.claimed".to_string(),
             EventType::TaskReleased => "task.released".to_string(),
-            EventType::TaskNext => "task.next".to_string(),
-            EventType::ProjectNext => "project.next".to_string(),
             EventType::DependencyAdded => "dependency.added".to_string(),
             EventType::DependencyRemoved => "dependency.removed".to_string(),
             EventType::CommentCreated => "comment.created".to_string(),
@@ -98,18 +94,17 @@ impl std::str::FromStr for EventType {
         Ok(match s {
             "project.created" => EventType::ProjectCreated,
             "project.updated" => EventType::ProjectUpdated,
+            "project.completed" => EventType::ProjectCompleted,
             "project.archived" => EventType::ProjectArchived,
+            "project.unarchived" => EventType::ProjectUnarchived,
             "task.created" => EventType::TaskCreated,
             "task.updated" => EventType::TaskUpdated,
-            "task.status_changed" => EventType::TaskStatusChanged,
             "task.started" => EventType::TaskStarted,
             "task.completed" => EventType::TaskCompleted,
             "task.blocked" => EventType::TaskBlocked,
             "task.unblocked" => EventType::TaskUnblocked,
             "task.claimed" => EventType::TaskClaimed,
             "task.released" => EventType::TaskReleased,
-            "task.next" => EventType::TaskNext,
-            "project.next" => EventType::ProjectNext,
             "dependency.added" => EventType::DependencyAdded,
             "dependency.removed" => EventType::DependencyRemoved,
             "comment.created" => EventType::CommentCreated,
@@ -190,14 +185,4 @@ impl Event {
     pub fn payload_json(&self) -> serde_json::Value {
         serde_json::from_str(&self.payload).unwrap_or(serde_json::Value::Null)
     }
-}
-
-#[derive(Debug)]
-pub struct CreateEvent {
-    pub event_type: EventType,
-    pub entity_type: EntityType,
-    pub entity_id: String,
-    pub actor: Option<String>,
-    pub session_id: Option<String>,
-    pub payload: serde_json::Value,
 }

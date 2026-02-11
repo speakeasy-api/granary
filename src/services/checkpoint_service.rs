@@ -80,22 +80,6 @@ pub async fn create_checkpoint(
 
     db::checkpoints::create(pool, &checkpoint).await?;
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::CheckpointCreated,
-            entity_type: EntityType::Checkpoint,
-            entity_id: id,
-            actor: None,
-            session_id: Some(session_id.to_string()),
-            payload: serde_json::json!({
-                "name": name,
-            }),
-        },
-    )
-    .await?;
-
     Ok(checkpoint)
 }
 
@@ -277,22 +261,6 @@ pub async fn restore_checkpoint(
             db::tasks::update(pool, &task).await?;
         }
     }
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::CheckpointRestored,
-            entity_type: EntityType::Checkpoint,
-            entity_id: checkpoint.id,
-            actor: None,
-            session_id: Some(session_id.to_string()),
-            payload: serde_json::json!({
-                "checkpoint_name": checkpoint_name,
-            }),
-        },
-    )
-    .await?;
 
     Ok(())
 }

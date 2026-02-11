@@ -9,6 +9,7 @@ use sqlx::FromRow;
 pub enum ProjectStatus {
     #[default]
     Active,
+    Completed,
     Archived,
 }
 
@@ -16,12 +17,17 @@ impl ProjectStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             ProjectStatus::Active => "active",
+            ProjectStatus::Completed => "completed",
             ProjectStatus::Archived => "archived",
         }
     }
 
     pub fn is_active(&self) -> bool {
         matches!(self, ProjectStatus::Active)
+    }
+
+    pub fn is_completed(&self) -> bool {
+        matches!(self, ProjectStatus::Completed)
     }
 }
 
@@ -37,6 +43,7 @@ impl std::str::FromStr for ProjectStatus {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "active" => Ok(ProjectStatus::Active),
+            "completed" => Ok(ProjectStatus::Completed),
             "archived" => Ok(ProjectStatus::Archived),
             _ => Err(()),
         }
@@ -64,6 +71,8 @@ pub struct Project {
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
+    #[serde(default)]
+    pub last_edited_by: Option<String>,
 }
 
 impl Project {

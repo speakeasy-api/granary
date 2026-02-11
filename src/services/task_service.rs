@@ -7,7 +7,7 @@ use crate::models::*;
 
 /// Create a new task in a project
 pub async fn create_task(pool: &SqlitePool, input: CreateTask) -> Result<Task> {
-    // Verify project exists
+    // Verify project exists (trigger handles auto-reactivation if completed)
     let _project = crate::services::get_project(pool, &input.project_id).await?;
 
     // Get next task number
@@ -32,7 +32,7 @@ pub async fn create_task(pool: &SqlitePool, input: CreateTask) -> Result<Task> {
         description: input.description,
         status: input.status.as_str().to_string(),
         priority: input.priority.as_str().to_string(),
-        owner: input.owner,
+        owner: input.owner.clone(),
         tags,
         blocked_reason: None,
         started_at: None,
@@ -46,26 +46,10 @@ pub async fn create_task(pool: &SqlitePool, input: CreateTask) -> Result<Task> {
         created_at: now.clone(),
         updated_at: now,
         version: 1,
+        last_edited_by: input.owner,
     };
 
     db::tasks::create(pool, &task).await?;
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::TaskCreated,
-            entity_type: EntityType::Task,
-            entity_id: task.id.clone(),
-            actor: None,
-            session_id: None,
-            payload: serde_json::json!({
-                "title": task.title,
-                "project_id": task.project_id,
-            }),
-        },
-    )
-    .await?;
 
     Ok(task)
 }
@@ -105,7 +89,6 @@ pub async fn list_subtasks(pool: &SqlitePool, parent_task_id: &str) -> Result<Ve
 /// Update a task
 pub async fn update_task(pool: &SqlitePool, id: &str, updates: UpdateTask) -> Result<Task> {
     let mut task = get_task(pool, id).await?;
-    let old_status = task.status.clone();
 
     if let Some(title) = updates.title {
         task.title = title;
@@ -138,6 +121,9 @@ pub async fn update_task(pool: &SqlitePool, id: &str, updates: UpdateTask) -> Re
         task.focus_weight = weight;
     }
 
+    // Set actor for trigger-based events
+    task.last_edited_by = task.owner.clone();
+
     let updated = db::tasks::update(pool, &task).await?;
     if !updated {
         return Err(GranaryError::VersionMismatch {
@@ -145,29 +131,6 @@ pub async fn update_task(pool: &SqlitePool, id: &str, updates: UpdateTask) -> Re
             found: task.version + 1,
         });
     }
-
-    // Log event
-    let event_type = if updates.status.is_some() && old_status != task.status {
-        EventType::TaskStatusChanged
-    } else {
-        EventType::TaskUpdated
-    };
-
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type,
-            entity_type: EntityType::Task,
-            entity_id: task.id.clone(),
-            actor: None,
-            session_id: None,
-            payload: serde_json::json!({
-                "old_status": old_status,
-                "new_status": task.status,
-            }),
-        },
-    )
-    .await?;
 
     get_task(pool, id).await
 }
@@ -185,6 +148,8 @@ pub async fn ready_task(pool: &SqlitePool, id: &str) -> Result<Task> {
     }
 
     task.status = TaskStatus::Todo.as_str().to_string();
+    // Set actor for trigger-based events
+    task.last_edited_by = task.owner.clone();
 
     let updated = db::tasks::update(pool, &task).await?;
     if !updated {
@@ -193,24 +158,6 @@ pub async fn ready_task(pool: &SqlitePool, id: &str) -> Result<Task> {
             found: task.version + 1,
         });
     }
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::TaskUpdated,
-            entity_type: EntityType::Task,
-            entity_id: task.id.clone(),
-            actor: None,
-            session_id: None,
-            payload: serde_json::json!({
-                "old_status": "draft",
-                "new_status": "todo",
-                "action": "ready",
-            }),
-        },
-    )
-    .await?;
 
     get_task(pool, id).await
 }
@@ -250,21 +197,10 @@ pub async fn start_task(pool: &SqlitePool, id: &str, owner: Option<String>) -> R
         task.owner = Some(o);
     }
 
-    db::tasks::update(pool, &task).await?;
+    // Set actor for trigger-based events
+    task.last_edited_by = task.owner.clone();
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::TaskStarted,
-            entity_type: EntityType::Task,
-            entity_id: task.id.clone(),
-            actor: task.owner.clone(),
-            session_id: None,
-            payload: serde_json::json!({}),
-        },
-    )
-    .await?;
+    db::tasks::update(pool, &task).await?;
 
     get_task(pool, id).await
 }
@@ -276,6 +212,8 @@ pub async fn complete_task(pool: &SqlitePool, id: &str, comment: Option<&str>) -
     task.status = TaskStatus::Done.as_str().to_string();
     task.completed_at = Some(chrono::Utc::now().to_rfc3339());
     task.blocked_reason = None;
+    // Set actor for trigger-based events
+    task.last_edited_by = task.owner.clone();
 
     db::tasks::update(pool, &task).await?;
 
@@ -302,19 +240,7 @@ pub async fn complete_task(pool: &SqlitePool, id: &str, comment: Option<&str>) -
         db::comments::create(pool, &comment).await?;
     }
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::TaskCompleted,
-            entity_type: EntityType::Task,
-            entity_id: task.id.clone(),
-            actor: task.owner.clone(),
-            session_id: None,
-            payload: serde_json::json!({}),
-        },
-    )
-    .await?;
+    // Auto-complete is handled by trg_project_auto_complete trigger
 
     get_task(pool, id).await
 }
@@ -325,24 +251,10 @@ pub async fn block_task(pool: &SqlitePool, id: &str, reason: &str) -> Result<Tas
 
     task.status = TaskStatus::Blocked.as_str().to_string();
     task.blocked_reason = Some(reason.to_string());
+    // Set actor for trigger-based events (system action)
+    task.last_edited_by = None;
 
     db::tasks::update(pool, &task).await?;
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::TaskBlocked,
-            entity_type: EntityType::Task,
-            entity_id: task.id.clone(),
-            actor: None,
-            session_id: None,
-            payload: serde_json::json!({
-                "reason": reason,
-            }),
-        },
-    )
-    .await?;
 
     get_task(pool, id).await
 }
@@ -358,22 +270,10 @@ pub async fn unblock_task(pool: &SqlitePool, id: &str) -> Result<Task> {
         TaskStatus::Todo.as_str().to_string()
     };
     task.blocked_reason = None;
+    // Set actor for trigger-based events (system action)
+    task.last_edited_by = None;
 
     db::tasks::update(pool, &task).await?;
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::TaskUnblocked,
-            entity_type: EntityType::Task,
-            entity_id: task.id.clone(),
-            actor: None,
-            session_id: None,
-            payload: serde_json::json!({}),
-        },
-    )
-    .await?;
 
     get_task(pool, id).await
 }
@@ -407,23 +307,10 @@ pub async fn claim_task(
         task.claim_lease_expires_at = Some(expires.to_rfc3339());
     }
 
-    db::tasks::update(pool, &task).await?;
+    // Set actor for trigger-based events
+    task.last_edited_by = Some(owner.to_string());
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::TaskClaimed,
-            entity_type: EntityType::Task,
-            entity_id: task.id.clone(),
-            actor: Some(owner.to_string()),
-            session_id: None,
-            payload: serde_json::json!({
-                "lease_minutes": lease_minutes,
-            }),
-        },
-    )
-    .await?;
+    db::tasks::update(pool, &task).await?;
 
     get_task(pool, id).await
 }
@@ -456,22 +343,10 @@ pub async fn release_task(pool: &SqlitePool, id: &str) -> Result<Task> {
     task.claim_claimed_at = None;
     task.claim_lease_expires_at = None;
     task.status = TaskStatus::Todo.to_string();
+    // Set actor for trigger-based events
+    task.last_edited_by = owner.clone();
 
     db::tasks::update(pool, &task).await?;
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::TaskReleased,
-            entity_type: EntityType::Task,
-            entity_id: task.id.clone(),
-            actor: owner,
-            session_id: None,
-            payload: serde_json::json!({}),
-        },
-    )
-    .await?;
 
     get_task(pool, id).await
 }
@@ -492,46 +367,12 @@ pub async fn add_dependency(pool: &SqlitePool, task_id: &str, depends_on: &str) 
 
     db::dependencies::add(pool, task_id, depends_on).await?;
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::DependencyAdded,
-            entity_type: EntityType::Task,
-            entity_id: task_id.to_string(),
-            actor: None,
-            session_id: None,
-            payload: serde_json::json!({
-                "depends_on": depends_on,
-            }),
-        },
-    )
-    .await?;
-
     Ok(())
 }
 
 /// Remove a dependency from a task
 pub async fn remove_dependency(pool: &SqlitePool, task_id: &str, depends_on: &str) -> Result<bool> {
     let removed = db::dependencies::remove(pool, task_id, depends_on).await?;
-
-    if removed {
-        // Log event
-        db::events::create(
-            pool,
-            &CreateEvent {
-                event_type: EventType::DependencyRemoved,
-                entity_type: EntityType::Task,
-                entity_id: task_id.to_string(),
-                actor: None,
-                session_id: None,
-                payload: serde_json::json!({
-                    "depends_on": depends_on,
-                }),
-            },
-        )
-        .await?;
-    }
 
     Ok(removed)
 }

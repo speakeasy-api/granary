@@ -560,9 +560,21 @@ pub enum ProjectAction {
         tags: Option<String>,
     },
 
+    /// Mark project as done (completed)
+    #[command(visible_alias = "complete")]
+    Done {
+        /// Also complete all remaining tasks
+        #[arg(long)]
+        complete_tasks: bool,
+    },
+
     /// Archive project
     #[command(visible_alias = "close")]
     Archive,
+
+    /// Restore an archived project
+    #[command(visible_alias = "restore")]
+    Unarchive,
 
     /// List or create tasks in project
     Tasks {
@@ -1252,10 +1264,6 @@ pub enum WorkerCommand {
         /// Maximum concurrent runner instances
         #[arg(long, default_value = "1")]
         concurrency: u32,
-
-        /// Cooldown in seconds for polled events like task.next (default: 300 = 5 minutes)
-        #[arg(long, default_value = "300")]
-        poll_cooldown: i64,
     },
 
     /// Show worker status

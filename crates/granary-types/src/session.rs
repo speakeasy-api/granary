@@ -55,6 +55,8 @@ pub struct Session {
     pub updated_at: String,
     #[serde(default)]
     pub closed_at: Option<String>,
+    #[serde(default)]
+    pub last_edited_by: Option<String>,
 }
 
 impl Session {

@@ -13,33 +13,17 @@ pub async fn create_session(pool: &SqlitePool, input: CreateSession) -> Result<S
     let session = Session {
         id: id.clone(),
         name: input.name,
-        owner: input.owner,
+        owner: input.owner.clone(),
         mode: Some(input.mode.as_str().to_string()),
         focus_task_id: None,
         variables: None,
         created_at: now.clone(),
         updated_at: now,
         closed_at: None,
+        last_edited_by: input.owner,
     };
 
     db::sessions::create(pool, &session).await?;
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::SessionStarted,
-            entity_type: EntityType::Session,
-            entity_id: session.id.clone(),
-            actor: session.owner.clone(),
-            session_id: Some(session.id.clone()),
-            payload: serde_json::json!({
-                "name": session.name,
-                "mode": session.mode,
-            }),
-        },
-    )
-    .await?;
 
     Ok(session)
 }
@@ -80,21 +64,10 @@ pub async fn update_session(
         session.variables = Some(serde_json::to_string(&vars)?);
     }
 
-    db::sessions::update(pool, &session).await?;
+    // Set actor for trigger-based events
+    session.last_edited_by = session.owner.clone();
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::SessionUpdated,
-            entity_type: EntityType::Session,
-            entity_id: session.id.clone(),
-            actor: session.owner.clone(),
-            session_id: Some(session.id.clone()),
-            payload: serde_json::json!({}),
-        },
-    )
-    .await?;
+    db::sessions::update(pool, &session).await?;
 
     get_session(pool, id).await
 }
@@ -146,22 +119,6 @@ pub async fn close_session(
         db::comments::create(pool, &comment).await?;
     }
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::SessionClosed,
-            entity_type: EntityType::Session,
-            entity_id: id.to_string(),
-            actor: session.owner.clone(),
-            session_id: Some(id.to_string()),
-            payload: serde_json::json!({
-                "summary": summary,
-            }),
-        },
-    )
-    .await?;
-
     // Clear current session if it's this one
     if workspace.current_session_id() == Some(id.to_string()) {
         workspace.clear_current_session()?;
@@ -182,23 +139,6 @@ pub async fn add_to_scope(
 
     db::sessions::add_scope(pool, session_id, item_type.as_str(), item_id).await?;
 
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::SessionScopeAdded,
-            entity_type: EntityType::Session,
-            entity_id: session_id.to_string(),
-            actor: None,
-            session_id: Some(session_id.to_string()),
-            payload: serde_json::json!({
-                "item_type": item_type.as_str(),
-                "item_id": item_id,
-            }),
-        },
-    )
-    .await?;
-
     Ok(())
 }
 
@@ -210,25 +150,6 @@ pub async fn remove_from_scope(
     item_id: &str,
 ) -> Result<bool> {
     let removed = db::sessions::remove_scope(pool, session_id, item_type.as_str(), item_id).await?;
-
-    if removed {
-        // Log event
-        db::events::create(
-            pool,
-            &CreateEvent {
-                event_type: EventType::SessionScopeRemoved,
-                entity_type: EntityType::Session,
-                entity_id: session_id.to_string(),
-                actor: None,
-                session_id: Some(session_id.to_string()),
-                payload: serde_json::json!({
-                    "item_type": item_type.as_str(),
-                    "item_id": item_id,
-                }),
-            },
-        )
-        .await?;
-    }
 
     Ok(removed)
 }
@@ -255,23 +176,9 @@ pub async fn set_focus_task(pool: &SqlitePool, session_id: &str, task_id: &str) 
 
     let mut session = get_session(pool, session_id).await?;
     session.focus_task_id = Some(task_id.to_string());
+    // Set actor for trigger-based events
+    session.last_edited_by = session.owner.clone();
     db::sessions::update(pool, &session).await?;
-
-    // Log event
-    db::events::create(
-        pool,
-        &CreateEvent {
-            event_type: EventType::SessionFocusChanged,
-            entity_type: EntityType::Session,
-            entity_id: session_id.to_string(),
-            actor: None,
-            session_id: Some(session_id.to_string()),
-            payload: serde_json::json!({
-                "focus_task_id": task_id,
-            }),
-        },
-    )
-    .await?;
 
     get_session(pool, session_id).await
 }
@@ -280,6 +187,8 @@ pub async fn set_focus_task(pool: &SqlitePool, session_id: &str, task_id: &str) 
 pub async fn clear_focus_task(pool: &SqlitePool, session_id: &str) -> Result<Session> {
     let mut session = get_session(pool, session_id).await?;
     session.focus_task_id = None;
+    // Set actor for trigger-based events
+    session.last_edited_by = session.owner.clone();
     db::sessions::update(pool, &session).await?;
     get_session(pool, session_id).await
 }

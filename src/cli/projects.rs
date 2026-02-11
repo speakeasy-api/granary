@@ -183,9 +183,23 @@ pub async fn project(
             println!("{}", output.format(cli_format));
         }
 
+        Some(ProjectAction::Done { complete_tasks }) => {
+            let project = services::complete_project(&pool, id, complete_tasks).await?;
+            if complete_tasks {
+                println!("Completed project (and all tasks): {}", project.id);
+            } else {
+                println!("Completed project: {}", project.id);
+            }
+        }
+
         Some(ProjectAction::Archive) => {
             let project = services::archive_project(&pool, id).await?;
             println!("Archived project: {}", project.id);
+        }
+
+        Some(ProjectAction::Unarchive) => {
+            let project = services::unarchive_project(&pool, id).await?;
+            println!("Unarchived project: {}", project.id);
         }
 
         Some(ProjectAction::Tasks { action }) => {

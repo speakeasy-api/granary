@@ -42,6 +42,8 @@ pub struct Task {
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
+    #[serde(default)]
+    pub last_edited_by: Option<String>,
 }
 
 impl Task {
