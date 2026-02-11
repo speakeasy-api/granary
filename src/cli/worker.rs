@@ -11,6 +11,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::cli::args::{CliOutputFormat, WorkerCommand};
+use crate::cli::workers;
 use crate::cli::workers::WorkerOutput;
 use crate::daemon::{LogTarget, StartWorkerRequest, ensure_daemon};
 use crate::error::{GranaryError, Result};
@@ -166,7 +167,10 @@ impl Output for WorkerPruneOutput {
 pub async fn worker(
     id: Option<String>,
     command: Option<WorkerCommand>,
+    all: bool,
     cli_format: Option<CliOutputFormat>,
+    watch: bool,
+    interval: u64,
 ) -> Result<()> {
     match command {
         Some(WorkerCommand::Start {
@@ -211,16 +215,13 @@ pub async fn worker(
             })?;
             stop_worker(&worker_id, runs, cli_format).await
         }
-        None => {
-            // Default: show status when only ID is provided
-            let worker_id = id.ok_or_else(|| {
-                GranaryError::InvalidArgument(
-                    "Worker ID is required. Use 'granary worker <id>' or 'granary worker start'"
-                        .to_string(),
-                )
-            })?;
-            show_status(&worker_id, cli_format).await
-        }
+        None => match id {
+            Some(worker_id) => show_status(&worker_id, cli_format).await,
+            None => {
+                workers::list_workers(all, cli_format, watch, interval).await?;
+                Ok(())
+            }
+        },
     }
 }
 

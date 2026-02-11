@@ -2,7 +2,6 @@ use granary_types::{CreateProject, CreateTask, Project, Task, UpdateProject};
 
 use crate::cli::args::{
     CliOutputFormat, ProjectAction, ProjectDepsAction, ProjectSteerAction, ProjectTasksAction,
-    ProjectsAction,
 };
 use crate::cli::tasks::TaskCreatedOutput;
 use crate::cli::watch::{watch_loop, watch_status_line};
@@ -75,43 +74,57 @@ impl Output for ProjectTasksOutput {
     }
 }
 
-/// Handle projects command (list or create)
-pub async fn projects(
-    action: Option<ProjectsAction>,
+/// Handle project list command
+pub async fn list(
     include_archived: bool,
     cli_format: Option<CliOutputFormat>,
     watch: bool,
     interval: u64,
 ) -> Result<()> {
+    if watch {
+        let interval_duration = Duration::from_secs(interval);
+        watch_loop(interval_duration, || async {
+            let output = fetch_and_format_projects(include_archived, cli_format)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            Ok(format!(
+                "{}\n\n{}",
+                watch_status_line(interval_duration),
+                output
+            ))
+        })
+        .await?;
+        Ok(())
+    } else {
+        let output = fetch_and_format_projects(include_archived, cli_format).await?;
+        println!("{}", output);
+        Ok(())
+    }
+}
+
+/// Handle project action without an ID (e.g., `granary project create "name"`)
+pub async fn project_action_without_id(
+    action: ProjectAction,
+    cli_format: Option<CliOutputFormat>,
+) -> Result<()> {
     match action {
-        None => {
-            // List projects - support watch mode
-            if watch {
-                let interval_duration = Duration::from_secs(interval);
-                watch_loop(interval_duration, || async {
-                    let output = fetch_and_format_projects(include_archived, cli_format)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("{}", e))?;
-                    Ok(format!(
-                        "{}\n\n{}",
-                        watch_status_line(interval_duration),
-                        output
-                    ))
-                })
-                .await?;
-                Ok(())
-            } else {
-                let output = fetch_and_format_projects(include_archived, cli_format).await?;
-                println!("{}", output);
-                Ok(())
-            }
-        }
-        Some(ProjectsAction::Create {
+        ProjectAction::Create {
             name,
+            name_flag,
             description,
             owner,
             tags,
-        }) => create_project(&name, description, owner, tags, cli_format).await,
+        } => {
+            let resolved_name = name.or(name_flag).ok_or_else(|| {
+                crate::error::GranaryError::InvalidArgument(
+                    "Project name is required. Usage: granary project create <name>".to_string(),
+                )
+            })?;
+            create_project(&resolved_name, description, owner, tags, cli_format).await
+        }
+        _ => Err(crate::error::GranaryError::InvalidArgument(
+            "Project ID is required for this action".to_string(),
+        )),
     }
 }
 
@@ -136,13 +149,6 @@ pub async fn project(
 ) -> Result<()> {
     let workspace = Workspace::find()?;
     let pool = workspace.pool().await?;
-
-    // Check if this is a create command
-    if id == "create" {
-        return Err(crate::error::GranaryError::InvalidArgument(
-            "Use 'granary projects create <name>' to create a project".to_string(),
-        ));
-    }
 
     match action {
         None => {
@@ -194,7 +200,8 @@ pub async fn project(
                     println!("{}", output.format(cli_format));
                 }
                 Some(ProjectTasksAction::Create {
-                    title,
+                    title_positional,
+                    title_flag,
                     description,
                     priority,
                     status,
@@ -203,6 +210,11 @@ pub async fn project(
                     tags,
                     due,
                 }) => {
+                    let title = title_positional.or(title_flag).ok_or_else(|| {
+                        crate::error::GranaryError::InvalidArgument(
+                            "Task title is required. Usage: granary project <id> tasks create <title>".to_string(),
+                        )
+                    })?;
                     let priority = priority.parse().unwrap_or_default();
                     let status = status.parse().unwrap_or_default();
                     let tags = tags
@@ -296,6 +308,13 @@ pub async fn project(
 
         Some(ProjectAction::Steer { action }) => {
             handle_steer_action(&pool, id, action).await?;
+        }
+
+        Some(ProjectAction::Create { .. }) => {
+            return Err(crate::error::GranaryError::InvalidArgument(
+                "Cannot create a project with an ID. Use: granary project create <name>"
+                    .to_string(),
+            ));
         }
     }
 

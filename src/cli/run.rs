@@ -287,10 +287,17 @@ async fn fetch_and_format_runs(
 }
 
 /// Handle run subcommands
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     id: Option<String>,
     command: Option<RunCommand>,
+    worker: Option<String>,
+    status: Option<String>,
+    all: bool,
+    limit: u32,
     cli_format: Option<CliOutputFormat>,
+    watch: bool,
+    interval: u64,
 ) -> Result<()> {
     let require_id = || -> Result<String> {
         id.clone()
@@ -303,15 +310,10 @@ pub async fn run(
         Some(RunCommand::Stop) => stop_run(&require_id()?, cli_format).await,
         Some(RunCommand::Pause) => pause_run(&require_id()?, cli_format).await,
         Some(RunCommand::Resume) => resume_run(&require_id()?, cli_format).await,
-        None => {
-            // Default: show status when only ID is provided
-            let run_id = id.ok_or_else(|| {
-                GranaryError::InvalidArgument(
-                    "Run ID is required. Use 'granary run <id>'".to_string(),
-                )
-            })?;
-            show_status(&run_id, cli_format).await
-        }
+        None => match id {
+            Some(run_id) => show_status(&run_id, cli_format).await,
+            None => list_runs(worker, status, all, limit, cli_format, watch, interval).await,
+        },
     }
 }
 

@@ -125,11 +125,15 @@ pub enum Commands {
     )]
     Plan {
         /// Feature/project name (creates a new project)
-        #[arg(conflicts_with = "project")]
+        #[arg(conflicts_with_all = ["project", "name_flag"])]
         name: Option<String>,
 
+        /// Feature/project name (alternative to positional)
+        #[arg(long = "name", conflicts_with_all = ["name", "project"])]
+        name_flag: Option<String>,
+
         /// Plan an existing project (for initiative sub-projects)
-        #[arg(long, conflicts_with = "name")]
+        #[arg(long, conflicts_with_all = ["name", "name_flag"])]
         project: Option<String>,
     },
 
@@ -144,6 +148,7 @@ pub enum Commands {
 
     /// Show any entity by ID (auto-detects type from ID pattern)
     #[command(
+        visible_aliases = ["view", "get", "inspect"],
         after_help = "EXAMPLES:\n    granary show my-project-abc1           # Show a project\n    granary show my-project-abc1-task-1    # Show a task\n    granary show sess-20260112-xyz1        # Show a session\n    granary show chkpt-abc123              # Show a checkpoint\n\nID PATTERNS:\n    project:    <name>-<4chars>              e.g., my-project-abc1\n    task:       <project-id>-task-<n>        e.g., my-project-abc1-task-1\n    session:    sess-<date>-<4chars>         e.g., sess-20260112-xyz1\n    checkpoint: chkpt-<6chars>               e.g., chkpt-abc123\n    comment:    <task-id>-comment-<n>        e.g., my-proj-abc1-task-1-comment-1\n    artifact:   <task-id>-artifact-<n>       e.g., my-proj-abc1-task-1-artifact-1"
     )]
     Show {
@@ -151,36 +156,35 @@ pub enum Commands {
         id: String,
     },
 
-    /// List all projects or create a new one
+    /// Manage projects
     #[command(
+        visible_alias = "projects",
         after_help = "AGENTS: To plan a new project with guided task creation, use:\n    granary plan \"Project name\""
     )]
-    Projects {
-        #[command(subcommand)]
-        action: Option<ProjectsAction>,
+    Project {
+        /// Project ID (omit to list all)
+        id: Option<String>,
 
-        /// Include archived projects (for list)
+        #[command(subcommand)]
+        action: Option<ProjectAction>,
+
+        /// Include archived (for list)
         #[arg(long)]
         all: bool,
     },
 
-    /// Work with a specific project or create a new one
+    /// Manage tasks
     #[command(
-        after_help = "AGENTS: To plan a new project with guided task creation, use:\n    granary plan \"Project name\""
+        visible_alias = "tasks",
+        after_help = "AGENTS: To work on a task with full context and steering, use:\n    granary work start <task-id>"
     )]
-    Project {
-        /// Project ID (or "create" to create a new project)
-        id: String,
+    Task {
+        /// Task ID (omit to list all)
+        id: Option<String>,
 
         #[command(subcommand)]
-        action: Option<ProjectAction>,
-    },
+        action: Option<TaskAction>,
 
-    /// List tasks
-    #[command(
-        after_help = "AGENTS: To work on a task with full context, use:\n    granary work start <task-id>"
-    )]
-    Tasks {
         /// Show all tasks (across all projects)
         #[arg(long)]
         all: bool,
@@ -198,18 +202,6 @@ pub enum Commands {
         owner: Option<String>,
     },
 
-    /// Work with a specific task
-    #[command(
-        after_help = "AGENTS: To work on this task with full context and steering, use:\n    granary work start <task-id>"
-    )]
-    Task {
-        /// Task ID
-        id: String,
-
-        #[command(subcommand)]
-        action: Option<TaskAction>,
-    },
-
     /// Get the next actionable task
     Next {
         /// Include reason for selection
@@ -223,6 +215,7 @@ pub enum Commands {
 
     /// Start a task (alias for task <id> start)
     #[command(
+        visible_alias = "begin",
         after_help = "AGENTS: For full task context with steering files, use:\n    granary work start <task-id>"
     )]
     Start {
@@ -256,17 +249,15 @@ pub enum Commands {
         task_id: String,
     },
 
-    /// List sessions
-    Sessions {
-        /// Include closed sessions
-        #[arg(long)]
-        all: bool,
-    },
-
-    /// Session management
+    /// Manage sessions
+    #[command(visible_alias = "sessions")]
     Session {
         #[command(subcommand)]
-        action: SessionAction,
+        action: Option<SessionAction>,
+
+        /// Include closed sessions (for list)
+        #[arg(long)]
+        all: bool,
     },
 
     /// Generate summary of current work
@@ -339,40 +330,42 @@ pub enum Commands {
     },
 
     /// Search projects and tasks by title
-    #[command(after_help = "EXAMPLE:\n    granary search \"oauth\"")]
+    #[command(
+        visible_alias = "find",
+        after_help = "EXAMPLE:\n    granary search \"oauth\""
+    )]
     Search {
         /// Search query
         query: String,
     },
 
-    /// List all initiatives or create a new one
+    /// Manage initiatives
     #[command(
-        after_help = "AGENTS: To plan a multi-project initiative, use:\n    granary initiate \"Initiative name\""
+        visible_alias = "initiatives",
+        subcommand_negates_reqs = true,
+        after_help = "EXAMPLES:\n    granary initiative                          # list all initiatives\n    granary initiatives                         # same (alias)\n    granary initiative user-auth-abc1 projects  # show projects in initiative\n\nAGENTS: To plan a multi-project initiative, use:\n    granary initiate \"Initiative name\""
     )]
-    Initiatives {
+    Initiative {
+        /// Initiative ID (omit to list all)
+        id: Option<String>,
+
         #[command(subcommand)]
-        action: Option<InitiativesAction>,
+        action: Option<InitiativeAction>,
 
         /// Include archived initiatives (for list)
         #[arg(long)]
         all: bool,
     },
 
-    /// Work with a specific initiative
-    #[command(after_help = "EXAMPLE:\n    granary initiative user-auth-abc1 projects")]
-    Initiative {
-        /// Initiative ID
-        id: String,
-
-        #[command(subcommand)]
-        action: Option<InitiativeAction>,
-    },
-
     /// Start planning a multi-project initiative (agent-friendly)
     #[command(after_help = "EXAMPLE:\n    granary initiate \"User authentication system\"")]
     Initiate {
         /// Initiative name
-        name: String,
+        name_positional: Option<String>,
+
+        /// Initiative name (alternative to positional)
+        #[arg(long = "name", conflicts_with = "name_positional")]
+        name_flag: Option<String>,
 
         /// Optional description
         #[arg(long)]
@@ -390,50 +383,44 @@ pub enum Commands {
         to: Option<String>,
     },
 
-    /// List all workers
-    Workers {
-        /// Include stopped/errored workers
-        #[arg(long)]
-        all: bool,
-    },
-
-    /// Manage a specific worker
-    #[command(subcommand_negates_reqs = true)]
+    /// Manage workers
+    #[command(visible_alias = "workers", subcommand_negates_reqs = true)]
     Worker {
-        /// Worker ID
+        /// Worker ID (omit to list all)
         id: Option<String>,
 
         #[command(subcommand)]
         command: Option<WorkerCommand>,
-    },
 
-    /// List all runs
-    Runs {
-        /// Filter by worker ID
-        #[arg(long)]
-        worker: Option<String>,
-
-        /// Filter by status (pending, running, completed, failed, paused, cancelled)
-        #[arg(long)]
-        status: Option<String>,
-
-        /// Include completed/failed/cancelled runs
+        /// Include stopped/errored workers (for list)
         #[arg(long)]
         all: bool,
-
-        /// Maximum number of runs to show
-        #[arg(long, default_value = "50")]
-        limit: u32,
     },
 
-    /// Manage a specific run
-    #[command(subcommand_negates_reqs = true)]
+    /// Manage runs
+    #[command(visible_alias = "runs", subcommand_negates_reqs = true)]
     Run {
-        /// Run ID
+        /// Run ID (omit to list all)
         id: Option<String>,
 
         #[command(subcommand)]
         command: Option<RunCommand>,
+
+        /// Filter by worker ID (for list)
+        #[arg(long)]
+        worker: Option<String>,
+
+        /// Filter by status: pending, running, completed, failed, paused, cancelled (for list)
+        #[arg(long)]
+        status: Option<String>,
+
+        /// Include completed/failed/cancelled runs (for list)
+        #[arg(long)]
+        all: bool,
+
+        /// Maximum number of runs to show (for list)
+        #[arg(long, default_value = "50")]
+        limit: u32,
     },
 
     /// List and manage events
@@ -472,6 +459,7 @@ pub enum Commands {
 pub enum WorkCommand {
     /// Start working on a task (claims it and outputs context)
     #[command(
+        visible_alias = "begin",
         after_help = "EXAMPLE:\n    granary work start my-project-abc1-task-1 --owner \"Opus 4.5\""
     )]
     Start {
@@ -485,6 +473,7 @@ pub enum WorkCommand {
 
     /// Mark task as done
     #[command(
+        visible_alias = "finish",
         after_help = "EXAMPLE:\n    granary work done my-project-abc1-task-1 \"Implemented OAuth2 token exchange\""
     )]
     Done {
@@ -492,11 +481,16 @@ pub enum WorkCommand {
         task_id: String,
 
         /// Summary of changes
-        summary: String,
+        summary_positional: Option<String>,
+
+        /// Summary of changes (alternative to positional)
+        #[arg(long = "summary", conflicts_with = "summary_positional")]
+        summary_flag: Option<String>,
     },
 
     /// Block task with reason
     #[command(
+        visible_alias = "hold",
         after_help = "EXAMPLE:\n    granary work block my-project-abc1-task-1 \"Waiting for API credentials\""
     )]
     Block {
@@ -504,11 +498,15 @@ pub enum WorkCommand {
         task_id: String,
 
         /// Reason for blocking
-        reason: String,
+        reason_positional: Option<String>,
+
+        /// Reason for blocking (alternative to positional)
+        #[arg(long = "reason", conflicts_with = "reason_positional")]
+        reason_flag: Option<String>,
     },
 
     /// Release task (give up claim)
-    #[command(after_help = "EXAMPLE:\n    granary work release my-project-abc1-task-1")]
+    #[command(visible_aliases = ["drop", "unclaim"], after_help = "EXAMPLE:\n    granary work release my-project-abc1-task-1")]
     Release {
         /// Task ID
         task_id: String,
@@ -516,14 +514,19 @@ pub enum WorkCommand {
 }
 
 #[derive(Subcommand)]
-pub enum ProjectsAction {
+pub enum ProjectAction {
     /// Create a new project
     #[command(
+        visible_aliases = ["new", "add"],
         after_help = "AGENTS: For guided project planning with task creation, use:\n    granary plan \"Project name\""
     )]
     Create {
         /// Project name
-        name: String,
+        name: Option<String>,
+
+        /// Project name (alternative to positional)
+        #[arg(long = "name", conflicts_with = "name")]
+        name_flag: Option<String>,
 
         /// Project description
         #[arg(long)]
@@ -537,11 +540,8 @@ pub enum ProjectsAction {
         #[arg(long)]
         tags: Option<String>,
     },
-}
-
-#[derive(Subcommand)]
-pub enum ProjectAction {
     /// Update project
+    #[command(visible_aliases = ["edit", "modify"])]
     Update {
         /// New name
         #[arg(long)]
@@ -561,6 +561,7 @@ pub enum ProjectAction {
     },
 
     /// Archive project
+    #[command(visible_alias = "close")]
     Archive,
 
     /// List or create tasks in project
@@ -576,6 +577,7 @@ pub enum ProjectAction {
     },
 
     /// Show project summary
+    #[command(visible_alias = "overview")]
     Summary,
 
     /// Mark project as ready for work (planning complete)
@@ -591,6 +593,7 @@ pub enum ProjectAction {
 #[derive(Subcommand)]
 pub enum ProjectSteerAction {
     /// Add a steering file to this project
+    #[command(visible_alias = "new")]
     Add {
         /// File path
         path: String,
@@ -601,12 +604,14 @@ pub enum ProjectSteerAction {
     },
 
     /// Remove a steering file from this project
+    #[command(visible_aliases = ["remove", "del", "delete"])]
     Rm {
         /// File path
         path: String,
     },
 
     /// List steering files for this project
+    #[command(visible_alias = "ls")]
     List,
 }
 
@@ -619,15 +624,18 @@ pub enum ProjectDepsAction {
     },
 
     /// Remove a dependency
+    #[command(visible_aliases = ["remove", "del", "delete"])]
     Rm {
         /// Project ID to remove from dependencies
         depends_on_id: String,
     },
 
     /// List all dependencies
+    #[command(visible_alias = "ls")]
     List,
 
     /// Show dependency graph
+    #[command(visible_alias = "tree")]
     Graph,
 }
 
@@ -635,11 +643,16 @@ pub enum ProjectDepsAction {
 pub enum ProjectTasksAction {
     /// Create a new task
     #[command(
+        visible_aliases = ["new", "add"],
         after_help = "EXAMPLE:\n    granary project my-proj-abc1 tasks create \"Implement OAuth\" --description \"Add OAuth2 flow\""
     )]
     Create {
         /// Task title
-        title: String,
+        title_positional: Option<String>,
+
+        /// Task title (alternative to positional)
+        #[arg(long = "title", conflicts_with = "title_positional")]
+        title_flag: Option<String>,
 
         /// Task description
         #[arg(long)]
@@ -674,6 +687,7 @@ pub enum ProjectTasksAction {
 #[derive(Subcommand)]
 pub enum TaskAction {
     /// Update task
+    #[command(visible_aliases = ["edit", "modify"])]
     Update {
         /// New title
         #[arg(long)]
@@ -709,6 +723,7 @@ pub enum TaskAction {
 
     /// Start working on task
     #[command(
+        visible_alias = "begin",
         after_help = "AGENTS: For full task context with steering files, use:\n    granary work start <task-id>"
     )]
     Start {
@@ -729,6 +744,7 @@ pub enum TaskAction {
     },
 
     /// Block task
+    #[command(visible_alias = "hold")]
     Block {
         /// Reason for blocking
         #[arg(long)]
@@ -736,6 +752,7 @@ pub enum TaskAction {
     },
 
     /// Unblock task
+    #[command(visible_alias = "unhold")]
     Unblock,
 
     /// Claim task with a lease
@@ -757,6 +774,7 @@ pub enum TaskAction {
     },
 
     /// Release claim on task
+    #[command(visible_aliases = ["drop", "unclaim"])]
     Release,
 
     /// Manage dependencies
@@ -793,18 +811,21 @@ pub enum DepsAction {
     },
 
     /// Remove a dependency
+    #[command(visible_aliases = ["remove", "del", "delete"])]
     Rm {
         /// Task ID to remove from dependencies
         task_id: String,
     },
 
     /// Show dependency graph
+    #[command(visible_alias = "tree")]
     Graph,
 }
 
 #[derive(Subcommand)]
 pub enum SubtaskAction {
     /// Create a subtask
+    #[command(visible_aliases = ["new", "add"])]
     Create {
         /// Subtask title
         title: String,
@@ -826,6 +847,7 @@ pub enum SubtaskAction {
 #[derive(Subcommand)]
 pub enum CommentAction {
     /// Create a comment
+    #[command(visible_aliases = ["new", "add"])]
     Create {
         /// Comment content (positional argument)
         content_positional: Option<String>,
@@ -847,6 +869,7 @@ pub enum CommentAction {
 #[derive(Subcommand)]
 pub enum ArtifactAction {
     /// Add a file artifact
+    #[command(visible_alias = "new")]
     Add {
         /// Artifact type (file, url, git_ref, log)
         artifact_type: String,
@@ -860,6 +883,7 @@ pub enum ArtifactAction {
     },
 
     /// Remove an artifact
+    #[command(visible_aliases = ["remove", "del", "delete"])]
     Rm {
         /// Artifact ID
         artifact_id: String,
@@ -869,9 +893,14 @@ pub enum ArtifactAction {
 #[derive(Subcommand)]
 pub enum SessionAction {
     /// Start a new session
+    #[command(visible_alias = "begin")]
     Start {
         /// Session name
-        name: String,
+        name_positional: Option<String>,
+
+        /// Session name (alternative to positional)
+        #[arg(long = "name", conflicts_with = "name_positional")]
+        name_flag: Option<String>,
 
         /// Session owner
         #[arg(long)]
@@ -892,6 +921,7 @@ pub enum SessionAction {
     },
 
     /// Close current or specified session
+    #[command(visible_alias = "end")]
     Close {
         /// Session ID (uses current if not specified)
         session_id: Option<String>,
@@ -912,6 +942,7 @@ pub enum SessionAction {
     },
 
     /// Remove item from session scope
+    #[command(visible_aliases = ["remove", "del", "delete"])]
     Rm {
         /// Item type
         item_type: String,
@@ -927,12 +958,18 @@ pub enum SessionAction {
 #[derive(Subcommand)]
 pub enum CheckpointAction {
     /// Create a checkpoint
+    #[command(visible_aliases = ["new", "add"])]
     Create {
         /// Checkpoint name
-        name: String,
+        name_positional: Option<String>,
+
+        /// Checkpoint name (alternative to positional)
+        #[arg(long = "name", conflicts_with = "name_positional")]
+        name_flag: Option<String>,
     },
 
     /// List checkpoints
+    #[command(visible_alias = "ls")]
     List,
 
     /// Compare two checkpoints
@@ -1057,9 +1094,11 @@ pub enum RunnersAction {
 #[derive(Subcommand)]
 pub enum SteeringAction {
     /// List steering files
+    #[command(visible_alias = "ls")]
     List,
 
     /// Add a steering file
+    #[command(visible_alias = "new")]
     Add {
         /// File path
         path: String,
@@ -1082,6 +1121,7 @@ pub enum SteeringAction {
     },
 
     /// Remove a steering file
+    #[command(visible_aliases = ["remove", "del", "delete"])]
     Rm {
         /// File path
         path: String,
@@ -1101,9 +1141,10 @@ pub enum SteeringAction {
 }
 
 #[derive(Subcommand)]
-pub enum InitiativesAction {
+pub enum InitiativeAction {
     /// Create a new initiative
     #[command(
+        visible_aliases = ["new", "add"],
         after_help = "AGENTS: For guided initiative planning with project creation, use:\n    granary initiate \"Initiative name\""
     )]
     Create {
@@ -1122,11 +1163,9 @@ pub enum InitiativesAction {
         #[arg(long)]
         tags: Option<String>,
     },
-}
 
-#[derive(Subcommand)]
-pub enum InitiativeAction {
     /// Update initiative
+    #[command(visible_aliases = ["edit", "modify"])]
     Update {
         /// New name
         #[arg(long)]
@@ -1146,6 +1185,7 @@ pub enum InitiativeAction {
     },
 
     /// Archive initiative
+    #[command(visible_alias = "close")]
     Archive,
 
     /// List projects in initiative
@@ -1176,12 +1216,14 @@ pub enum InitiativeAction {
 
     /// Show a high-level summary of the initiative.
     /// Includes progress, blockers, and next actions.
+    #[command(visible_alias = "overview")]
     Summary,
 }
 
 #[derive(Subcommand)]
 pub enum WorkerCommand {
     /// Start a new worker
+    #[command(visible_alias = "begin")]
     Start {
         /// Runner name from config
         #[arg(long)]
@@ -1231,6 +1273,7 @@ pub enum WorkerCommand {
     },
 
     /// Stop a worker
+    #[command(visible_aliases = ["halt", "kill"])]
     Stop {
         /// Also stop/cancel all active runs
         #[arg(long)]
@@ -1258,6 +1301,7 @@ pub enum RunCommand {
     },
 
     /// Stop a running run
+    #[command(visible_aliases = ["halt", "kill"])]
     Stop,
 
     /// Pause a running run (sends SIGSTOP)

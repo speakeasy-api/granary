@@ -129,10 +129,28 @@ pub async fn work(command: WorkCommand, cli_format: Option<CliOutputFormat>) -> 
         WorkCommand::Start { task_id, owner } => {
             work_start(&task_id, owner, cli_format).await?;
         }
-        WorkCommand::Done { task_id, summary } => {
+        WorkCommand::Done {
+            task_id,
+            summary_positional,
+            summary_flag,
+        } => {
+            let summary = summary_positional.or(summary_flag).ok_or_else(|| {
+                GranaryError::InvalidArgument(
+                    "Summary is required. Usage: granary work done <task-id> <summary>".to_string(),
+                )
+            })?;
             work_done(&task_id, &summary, cli_format).await?;
         }
-        WorkCommand::Block { task_id, reason } => {
+        WorkCommand::Block {
+            task_id,
+            reason_positional,
+            reason_flag,
+        } => {
+            let reason = reason_positional.or(reason_flag).ok_or_else(|| {
+                GranaryError::InvalidArgument(
+                    "Reason is required. Usage: granary work block <task-id> <reason>".to_string(),
+                )
+            })?;
             work_block(&task_id, &reason, cli_format).await?;
         }
         WorkCommand::Release { task_id } => {

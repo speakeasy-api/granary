@@ -89,7 +89,17 @@ pub async fn session(action: SessionAction, cli_format: Option<CliOutputFormat>)
     let pool = workspace.pool().await?;
 
     match action {
-        SessionAction::Start { name, owner, mode } => {
+        SessionAction::Start {
+            name_positional,
+            name_flag,
+            owner,
+            mode,
+        } => {
+            let name = name_positional.or(name_flag).ok_or_else(|| {
+                GranaryError::InvalidArgument(
+                    "Session name is required. Usage: granary session start <name>".to_string(),
+                )
+            })?;
             let mode = mode.parse().unwrap_or_default();
 
             let session = services::create_session(

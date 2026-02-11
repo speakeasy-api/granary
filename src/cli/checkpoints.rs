@@ -59,7 +59,16 @@ pub async fn checkpoint(
         .ok_or(GranaryError::NoActiveSession)?;
 
     match action {
-        CheckpointAction::Create { name } => {
+        CheckpointAction::Create {
+            name_positional,
+            name_flag,
+        } => {
+            let name = name_positional.or(name_flag).ok_or_else(|| {
+                GranaryError::InvalidArgument(
+                    "Checkpoint name is required. Usage: granary checkpoint create <name>"
+                        .to_string(),
+                )
+            })?;
             let checkpoint = services::create_checkpoint(&pool, &session_id, &name).await?;
             println!("Created checkpoint: {}", checkpoint.name);
             let output = CheckpointOutput { checkpoint };
