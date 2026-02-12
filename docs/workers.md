@@ -41,7 +41,7 @@ granary config runners add claude \
   --arg "--allowedTools" \
   --arg "Bash,Read,Write,Edit,Glob,Grep" \
   --arg "--message" \
-  --arg "Execute granary task {task.id}" \
+  --arg "Execute granary task {event.entity_id}" \
   --concurrency 2
 ```
 
@@ -58,7 +58,7 @@ granary worker start --runner claude --on task.unblocked
 # Or use an inline command
 granary worker start \
   --command "echo" \
-  --arg "Task {task.id} is now ready!" \
+  --arg "Task {event.entity_id} is now ready!" \
   --on task.unblocked
 ```
 
@@ -136,9 +136,9 @@ granary worker start --runner claude --on task.unblocked
 # Using inline command with filters
 granary worker start \
   --command "slack-notify" \
-  --arg "{task.title}" \
+  --arg "{title}" \
   --on task.done \
-  --filter "task.priority=P0"
+  --filter "priority=P0"
 
 # High concurrency for parallel processing
 granary worker start --runner claude --on task.unblocked --concurrency 4
@@ -254,9 +254,9 @@ Filters narrow down which events a worker processes.
 
 | Operator | Meaning | Example |
 |----------|---------|---------|
-| `=` | Equals | `task.status=in_progress` |
-| `!=` | Not equals | `task.priority!=P4` |
-| `~=` | Contains (substring) | `task.title~=api` |
+| `=` | Equals | `status=in_progress` |
+| `!=` | Not equals | `priority!=P4` |
+| `~=` | Contains (substring) | `title~=api` |
 
 ### Nested Fields
 
@@ -264,13 +264,13 @@ Access nested JSON fields using dot notation:
 
 ```bash
 # Filter by task priority
---filter "task.priority=P0"
+--filter "priority=P0"
 
 # Filter by project name
---filter "project.name=backend-api"
+--filter "name=backend-api"
 
 # Combine multiple filters (AND logic)
---filter "task.priority=P0" --filter "task.owner=claude"
+--filter "priority=P0" --filter "owner=claude"
 ```
 
 ### Array Indexing
@@ -283,7 +283,7 @@ Access array elements by index:
 
 ### Special Values
 
-- Empty string for null/missing: `--filter "task.owner="`
+- Empty string for null/missing: `--filter "owner="`
 - "null" literal: `--filter "field=null"`
 
 ## Template Substitution
@@ -295,46 +295,37 @@ Command arguments support placeholder substitution from event payloads.
 Use `{path.to.value}` to substitute values:
 
 ```bash
---arg "Execute task {task.id}"
---arg "--project={project.id}"
+--arg "Execute task {event.entity_id}"
+--arg "--project={project_id}"
 ```
 
 ### Available Placeholders
 
-**Event-level:**
+**Event-level (from the event row itself):**
 
 | Placeholder | Description |
 |-------------|-------------|
 | `{event.id}` | Event ID |
-| `{event.type}` | Event type (e.g., "task.unblocked") |
+| `{event.type}` | Event type (e.g., "task.next") |
 | `{event.entity_type}` | Entity type (e.g., "task") |
 | `{event.entity_id}` | Entity ID |
 | `{event.created_at}` | Event timestamp |
 
-**Task fields (when event is task-related):**
+**Payload fields (top-level fields from the event JSON payload):**
+
+Task event payloads contain flat fields — use them directly (not nested under `task.`):
 
 | Placeholder | Description |
 |-------------|-------------|
-| `{task.id}` | Task ID |
-| `{task.title}` | Task title |
-| `{task.status}` | Task status |
-| `{task.priority}` | Task priority |
-| `{task.owner}` | Task owner |
-| `{task.description}` | Task description |
-
-**Project fields:**
-
-| Placeholder | Description |
-|-------------|-------------|
-| `{project.id}` | Project ID |
-| `{project.name}` | Project name |
-
-**Session fields:**
-
-| Placeholder | Description |
-|-------------|-------------|
-| `{session.id}` | Session ID |
-| `{session.name}` | Session name |
+| `{id}` | Entity ID (from payload) |
+| `{title}` | Task title |
+| `{status}` | Task/project status |
+| `{priority}` | Task priority |
+| `{owner}` | Task/project owner |
+| `{description}` | Task/project description |
+| `{project_id}` | Project ID (on task events) |
+| `{name}` | Project/session name (on project/session events) |
+| `{slug}` | Project slug (on project events) |
 
 ### Unknown Placeholders
 
@@ -345,25 +336,25 @@ Unknown placeholders are replaced with empty strings, allowing graceful handling
 Runners are configured in `~/.granary/config.toml`:
 
 ```toml
-[runners.claude]
+[runners.claude-implementer]
 command = "claude"
-args = ["--print", "--message", "Execute task {task.id}"]
-concurrency = 2
-on = "task.unblocked"
+args = ["-p", "$(granary work start {event.entity_id})"]
+concurrency = 3
+on = "task.next"
 
 [runners.slack]
 command = "curl"
 args = [
   "-X", "POST",
   "-H", "Content-Type: application/json",
-  "-d", "{\"text\": \"Task {task.title} completed!\"}",
+  "-d", "{\"text\": \"Task {title} completed!\"}",
   "${SLACK_WEBHOOK_URL}"
 ]
 concurrency = 10
 
 [runners.custom-script]
 command = "/path/to/script.sh"
-args = ["{task.id}", "{project.id}"]
+args = ["{event.entity_id}", "{project_id}"]
 env = { API_KEY = "secret", DEBUG = "true" }
 ```
 
@@ -377,7 +368,7 @@ granary config runners
 granary config runners add myrunner \
   --command "python" \
   --arg "script.py" \
-  --arg "{task.id}"
+  --arg "{event.entity_id}"
 
 # Update an existing runner
 granary config runners update myrunner --concurrency 4
@@ -483,7 +474,7 @@ granary config runners add claude-tasks \
   --arg "--allowedTools" \
   --arg "Bash,Read,Write,Edit,Glob,Grep" \
   --arg "--message" \
-  --arg "Execute granary task {task.id}. Use /granary:execute-task skill." \
+  --arg "Execute granary task {event.entity_id}. Use /granary:execute-task skill." \
   --concurrency 2
 
 # Start the worker
@@ -501,7 +492,7 @@ granary config runners add slack-notify \
   --arg "-H" \
   --arg "Content-Type: application/json" \
   --arg "-d" \
-  --arg "{\"text\": \"P0 Task Ready: {task.title}\"}" \
+  --arg "{\"text\": \"P0 Task Ready: {title}\"}" \
   --arg "${SLACK_WEBHOOK_URL}" \
   --concurrency 10
 
@@ -509,7 +500,7 @@ granary config runners add slack-notify \
 granary worker start \
   --runner slack-notify \
   --on task.unblocked \
-  --filter "task.priority=P0"
+  --filter "priority=P0"
 ```
 
 ### Custom Script for Code Review
@@ -518,8 +509,8 @@ granary worker start \
 # Configure the runner
 granary config runners add code-review \
   --command "/scripts/trigger-review.sh" \
-  --arg "{task.id}" \
-  --arg "{project.id}" \
+  --arg "{event.entity_id}" \
+  --arg "{project_id}" \
   --env "GITHUB_TOKEN=${GITHUB_TOKEN}" \
   --concurrency 1
 
@@ -534,16 +525,16 @@ granary worker start --runner code-review --on task.done
 granary worker start \
   --runner claude-tasks \
   --on task.unblocked \
-  --filter "task.priority=P0" \
+  --filter "priority=P0" \
   --concurrency 2
 
 # P1-P2 tasks share a worker
 granary worker start \
   --runner claude-tasks \
   --on task.unblocked \
-  --filter "task.priority!=P0" \
-  --filter "task.priority!=P3" \
-  --filter "task.priority!=P4" \
+  --filter "priority!=P0" \
+  --filter "priority!=P3" \
+  --filter "priority!=P4" \
   --concurrency 1
 ```
 

@@ -1,172 +1,125 @@
 # Granary
 
-A CLI context hub for agentic work. Granary supercharges your agentic workflows. It seamlessly integrates into your existing AI tools and teaches them how to share and manage context more efficiently.
-
-## Features
-
-- **Session-centric**: Explicit "what's in context" for each agent run
-- **LLM-first I/O**: Every command has `--json` and `--format prompt` for machine consumption
-- **Local-first**: All state stored locally (SQLite), no network dependency
-- **Concurrency-tolerant**: Task claiming with leases for multi-agent safety
-- **Context packs**: Generate summaries and handoffs optimized for LLM context windows
-
-## Getting started for Claude Code
-
-1. Add the granary marketplace
+Shared memory and coordination for AI coding agents. Single binary, local-first, no cloud.
 
 ```sh
-claude plugin marketplace add speakeasy-api/granary
+# Install
+curl -sSfL https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.sh | sh
+
+# Init + plan + watch
+granary init
+claude -p "use granary to plan: Migrate endpoints to v2" & granary summary --watch
 ```
 
-2. Install the granary plugin from the marketplace
+## Getting Started
 
-```sh
-claude plugin install granary@granary
-```
+### Install
 
-3. Launch Claude and verify skills are available with `/skills` - you should see something like:
-
-```sh
-  granary-orchestrate · ~43 tokens
-  granary-initiative-planner · ~40 tokens
-  granary-plan-work · ~38 tokens
-  granary-setup · ~33 tokens
-  granary-execute-task · ~28 tokens
-```
-
-4. Prompt Claude to `set up granary for this project`
-
-Claude will install and initialize `granary` in your project.
-
-## How to get the most out of Granary
-
-Granary works best when used with the Claude Code skills. The skills teach Claude how to use Granary effectively.
-
-### Example workflows
-
-Use similar prompts to see Granary in action.
-
-- `use granary to plan a new audit service`
-- Once the plan is complete, you can review it with `granary summary`
-- Start implementation by telling Claude: `use granary to implement audit service`
-
-## Installation
-
-### macOS / Linux
+**macOS / Linux:**
 
 ```sh
 curl -sSfL https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.sh | sh
 ```
 
-### Windows (PowerShell)
+**Windows (PowerShell):**
 
 ```powershell
 irm https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.ps1 | iex
 ```
 
-### Installing a specific version
-
-You can install a specific version (including pre-releases) by setting the `GRANARY_VERSION` environment variable:
-
-**macOS / Linux:**
-
-```sh
-GRANARY_VERSION=0.6.2 curl -sSfL https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.sh | sh
-```
-
-**Windows (PowerShell):**
-
-```powershell
-$env:GRANARY_VERSION='0.6.2'; irm https://raw.githubusercontent.com/speakeasy-api/granary/main/scripts/install.ps1 | iex
-```
-
-### Updating
-
-To update to the latest stable version:
-
-```sh
-granary update
-```
-
-To install a specific version (including pre-releases):
-
-```sh
-granary update --to=0.6.3-pre.1
-```
-
-### From source
-
-Requires [Rust](https://rustup.rs/):
+**From source** (requires [Rust](https://rustup.rs/)):
 
 ```sh
 cargo install --git https://github.com/speakeasy-api/granary.git
 ```
 
-## Quick Start
+### LLM-First workflow
 
 ```sh
-# Initialize a workspace
 granary init
-
-# Create a project
-granary projects create "My Project" --description "Building something great"
-
-# Start a session
-granary session start "feature-work" --owner "Claude Code"
-
-# Add tasks
-granary project my-project-xxxx tasks create "Implement login" --priority P0
-granary project my-project-xxxx tasks create "Add tests" --priority P1
-
-# Get the next actionable task
+granary plan "User authentication"
 granary next
-
-# Start working on a task
-granary start my-project-xxxx-task-1
-
-# Mark it done
-granary task my-project-xxxx-task-1 done
-
-# Get a summary for your LLM
+granary work <task-id>
+granary task <task-id> done
 granary summary --format prompt
 ```
 
+`plan` creates a project and breaks it into tasks. `work` claims a task and gives your agent full context. `summary` produces an LLM-optimized handoff of everything that happened.
+
+## Runners & Workers
+
+Runners are reusable command configs. Workers subscribe to events and spawn runners automatically. This is the core automation loop — plan work, then let workers drive execution.
+
+### 1. Configure a runner
+
+```sh
+granary config runners add claude-implementer \
+  --command "claude" \
+  --arg "-p" \
+  --arg "$(granary work start {event.entity_id})" \
+  --arg "--allowedTools" \
+  --arg "Bash,Read,Write,Edit,Glob,Grep" \
+  --concurrency 3
+```
+
+### 2. Start a worker
+
+```sh
+granary worker start --runner claude-implementer --on task.next
+```
+
+Now every time a task is available, a Claude Code session is spawned with the task context piped in. Add filters to narrow scope:
+
+```sh
+granary worker start --runner claude-implementer --on task.next --filter "priority=P0"
+```
+
+### 3. Monitor
+
+```sh
+granary workers              # List active workers
+granary runs                 # List runner executions
+granary runs --watch         # Live-updating view
+granary run <run-id> logs    # Inspect a specific run
+```
+
+Runner args support `{event.entity_id}`, `{id}`, `{title}`, `{project_id}`, and other event payload fields. See [docs/workers.md](docs/workers.md) for the full reference on events, filters, template substitution, retry behavior, and concurrency control.
+
 ## Why Granary?
 
-Granary is designed for the agentic loop pattern:
+Agents don't coordinate well on their own. Without shared infrastructure they lose context between sessions, duplicate work, and create silent conflicts.
 
-1. **Plan**: Create projects and tasks, set dependencies
-2. **Execute**: Agents claim tasks, work on them, report progress
-3. **Coordinate**: Multiple agents can work safely in parallel with leases
-4. **Handoff**: Generate context packs for sub-agents or human review
+- **Session-centric context** — explicit "what's in context" for each agent run, so nothing is lost between handoffs
+- **Lossless planning** — agents can clear their working context freely; granary persists decisions and progress for the next agent
+- **Concurrency safety** — task claiming with leases prevents multiple agents from colliding on the same work
+- **LLM-native commands** — `plan`, `work`, and `initiate` bundle multiple operations into single calls, reducing tool invocations
+- **Event-driven automation** — workers react to state changes and spawn agent sessions without human intervention
 
-### Key Concepts
+## CLI Workflows
 
-- **Workspace**: A directory (typically a repo) containing `.granary/`
-- **Project**: Long-lived initiative with tasks and steering references
-- **Task**: Unit of work with status, priority, dependencies, and claiming
-- **Session**: Container for "what's in context" for a run
-- **Checkpoint**: Snapshot of state for pause/resume or rollback
+### Planning
 
-## Commands
-
-```
-granary init          # Initialize workspace
-granary projects      # List/create projects
-granary tasks         # List tasks in session scope
-granary next          # Get next actionable task
-granary start <id>    # Start working on a task
-granary summary       # Generate work summary
-granary context       # Export context pack for LLM
-granary handoff       # Generate handoff for sub-agent
-granary checkpoint    # Create/restore checkpoints
-granary search        # Search projects and tasks by title
-granary workers       # List all workers
-granary worker start  # Start a new event-driven worker
-granary runs          # List all runner executions
+```sh
+granary plan "Audit service"
+granary initiate "Q1 Platform Migration"
 ```
 
-Use `granary --help` or `granary <command> --help` for detailed usage.
+### Task management
+
+```sh
+granary project <project-id> tasks create "Implement login" --priority P0
+granary next
+granary start <task-id>
+granary search "auth"
+```
+
+### Context & handoffs
+
+```sh
+granary context --format prompt --token-budget 2000
+granary handoff --to "Code Review Agent" --tasks task-1,task-2
+granary summary
+```
 
 ## Output Formats
 
@@ -175,68 +128,53 @@ Every command supports multiple output formats:
 ```sh
 granary tasks                    # Human-readable table
 granary tasks --json             # JSON for parsing
+granary tasks --format prompt    # Optimized for LLM context
 granary tasks --format yaml      # YAML
 granary tasks --format md        # Markdown
-granary tasks --format prompt    # Optimized for LLM context
-
-granary search "api"             # Search in human-readable table
-granary search "api" --json      # JSON for parsing
 ```
 
 ## Watch Mode
 
-Monitor changes in real-time with `--watch`. The output refreshes automatically at a configurable interval:
-
 ```sh
-# Watch tasks with default 2-second refresh
 granary tasks --watch
-
-# Watch workers with 5-second refresh
 granary workers --watch --interval 5
-
-# Watch runs filtered by status
 granary runs --watch --status running
-
-# Watch search results
-granary search "api" --watch
 ```
 
-Supported commands: `tasks`, `projects`, `workers`, `runs`, `sessions`, `initiatives`, `search`, `summary`
+Supported commands: `tasks`, `projects`, `workers`, `runs`, `sessions`, `initiatives`, `search`, `summary`.
 
-Press `Ctrl+C` to exit watch mode.
+## Key Concepts
 
-## Integration with Claude Code
+| Concept       | Description                                                           |
+| ------------- | --------------------------------------------------------------------- |
+| **Workspace** | A directory (typically a repo) containing `.granary/`                 |
+| **Project**   | Long-lived initiative with tasks and steering references              |
+| **Task**      | Unit of work with status, priority, dependencies, and claiming        |
+| **Runner**    | A reusable command configuration (stored in `~/.granary/config.toml`) |
+| **Worker**    | A process that subscribes to events and spawns runners                |
+| **Session**   | Container for "what's in context" for an agent run                    |
 
-Granary works seamlessly with Claude Code and other LLM coding assistants:
+## Commands
 
-```sh
-# Set session for sub-agents
-eval $(granary session env)
-
-# Generate context for prompts
-granary context --format prompt --token-budget 2000
-
-# Handoff to a review agent
-granary handoff --to "Code Review Agent" --tasks task-1,task-2
+```
+granary init              # Initialize workspace
+granary plan              # Plan a feature interactively
+granary initiate          # Plan a multi-project initiative
+granary work <task-id>    # Claim and work on a task
+granary next              # Get next actionable task
+granary start <id>        # Start working on a task
+granary search            # Search projects and tasks
+granary summary           # Generate work summary
+granary context           # Export context pack for LLM
+granary handoff           # Generate handoff for sub-agent
+granary config runners    # Manage runner configurations
+granary worker start      # Start an event-driven worker
+granary workers           # List all workers
+granary runs              # List all runner executions
+granary checkpoint        # Create/restore checkpoints
 ```
 
-## Workers (Event-driven Automation)
-
-Workers are long-running processes that subscribe to granary events and automatically spawn commands. For example, automatically run Claude Code when tasks become unblocked:
-
-```sh
-# Configure a runner
-granary config runners add claude \
-  --command "claude" \
-  --arg "--print" \
-  --arg "--message" \
-  --arg "Execute task {task.id}"
-
-# Start a worker
-granary worker start --runner claude --on task.unblocked
-```
-
-See [docs/workers.md](docs/workers.md) for complete documentation on workers, runners, filters, and template substitution.
+Use `granary --help` or `granary <command> --help` for detailed usage.
 
 ## License
 

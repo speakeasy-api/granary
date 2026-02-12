@@ -68,6 +68,7 @@ jobs:
         run: |
           mkdir -p Silo.app/Contents/MacOS Silo.app/Contents/Resources
           cp target/${{ matrix.target }}/release/silo Silo.app/Contents/MacOS/Silo
+          cp crates/silo/resources/AppIcon.icns Silo.app/Contents/Resources/AppIcon.icns
           VERSION=${GITHUB_REF_NAME#v}
           cat > Silo.app/Contents/Info.plist << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -81,6 +82,7 @@ jobs:
             <key>CFBundleVersion</key><string>$VERSION</string>
             <key>CFBundleShortVersionString</key><string>$VERSION</string>
             <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleIconFile</key><string>AppIcon</string>
             <key>NSHighResolutionCapable</key><true/>
           </dict>
           </plist>

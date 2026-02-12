@@ -7,9 +7,14 @@
 //! Supported placeholders:
 //! - `{event.id}` - The event ID
 //! - `{event.type}` - The event type
-//! - `{task.id}`, `{task.title}`, etc. - Task fields from the event payload
-//! - `{project.id}`, `{project.name}`, etc. - Project fields from the event payload
-//! - `{field}` - Top-level fields from the event payload
+//! - `{event.entity_id}` - The entity ID from the event row
+//! - `{field}` - Top-level fields from the event payload (e.g., `{id}`, `{title}`, `{priority}`)
+//! - `{task.field}` - Nested lookup under a `task` key in the payload (if present)
+//! - `{project.field}` - Nested lookup under a `project` key in the payload (if present)
+//! - `{session.field}` - Nested lookup under a `session` key in the payload (if present)
+//!
+//! Note: Most event payloads use flat top-level fields (e.g., `{id}`, `{title}`),
+//! not nested objects. Use `{event.entity_id}` for the most reliable entity ID access.
 
 use crate::error::Result;
 use crate::models::Event;
