@@ -233,6 +233,7 @@ mod tests {
             concurrency: 4,
             instance_path: "/home/user/project".to_string(),
             detached: true,
+            since: None,
         };
 
         assert_eq!(create.runner_name, Some("claude".to_string()));
@@ -359,6 +360,7 @@ mod tests {
             concurrency: 2,
             instance_path: "/projects/myapp".to_string(),
             detached: false,
+            since: None,
         };
 
         assert!(create.runner_name.is_some());
@@ -376,6 +378,7 @@ mod tests {
             concurrency: 1,
             instance_path: "/projects/myapp".to_string(),
             detached: false,
+            since: None,
         };
 
         assert!(create.runner_name.is_none());
@@ -397,6 +400,7 @@ mod tests {
             concurrency: 10,
             instance_path: "/projects/backend".to_string(),
             detached: true,
+            since: None,
         };
 
         assert_eq!(create.filters.len(), 3);

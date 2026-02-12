@@ -178,7 +178,7 @@ async fn fetch_and_format_events(
 }
 
 /// Parse a string as either a relative duration ("1h", "7d", "30m") or an ISO timestamp.
-fn parse_duration_or_timestamp(s: &str) -> Result<String> {
+pub fn parse_duration_or_timestamp(s: &str) -> Result<String> {
     // Try relative duration first
     if let Some(duration) = parse_relative_duration(s) {
         let cutoff = chrono::Utc::now() - duration;

@@ -324,6 +324,7 @@ async fn dispatch_request(request: Request, manager: &WorkerManager) -> (Respons
                 concurrency: req.concurrency,
                 instance_path: req.instance_path,
                 detached: !req.attach,
+                since: req.since,
             };
 
             match manager.start_worker(create).await {

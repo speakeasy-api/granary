@@ -216,6 +216,9 @@ pub struct StartWorkerRequest {
     pub instance_path: String,
     /// Whether to attach to the worker's output stream
     pub attach: bool,
+    /// Resolved ISO timestamp to start processing events from
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
 }
 
 impl Default for StartWorkerRequest {
@@ -229,6 +232,7 @@ impl Default for StartWorkerRequest {
             concurrency: 1,
             instance_path: String::new(),
             attach: false,
+            since: None,
         }
     }
 }

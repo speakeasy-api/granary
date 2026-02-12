@@ -106,6 +106,7 @@ impl WorkerManager {
 
         let config = WorkerRuntimeConfig {
             log_dir: Some(log_dir),
+            since: create.since,
             ..Default::default()
         };
 

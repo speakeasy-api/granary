@@ -63,6 +63,8 @@ pub struct WorkerRuntimeConfig {
     pub poll_interval: Duration,
     /// Directory for log files (defaults to ~/.granary/logs/{worker_id}/)
     pub log_dir: Option<PathBuf>,
+    /// Resolved ISO timestamp to start processing events from (ephemeral)
+    pub since: Option<String>,
 }
 
 impl Default for WorkerRuntimeConfig {
@@ -72,6 +74,7 @@ impl Default for WorkerRuntimeConfig {
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             poll_interval: Duration::from_millis(DEFAULT_POLL_INTERVAL_MS),
             log_dir: None,
+            since: None,
         }
     }
 }
@@ -123,8 +126,13 @@ impl WorkerRuntime {
         let poller_config =
             EventPollerConfig::with_poll_interval(config.poll_interval).auto_update_cursor(false); // We manage cursor updates manually
 
-        let poller =
-            create_poller_for_worker(&worker, workspace_pool.clone(), poller_config).await?;
+        let poller = create_poller_for_worker(
+            &worker,
+            workspace_pool.clone(),
+            poller_config,
+            config.since.clone(),
+        )
+        .await?;
 
         // Determine log directory
         let log_dir = config.log_dir.clone().unwrap_or_else(|| {

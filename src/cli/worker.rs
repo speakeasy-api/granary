@@ -181,6 +181,7 @@ pub async fn worker(
             filters,
             detached,
             concurrency,
+            since,
         }) => {
             start_worker(StartWorkerArgs {
                 runner_name: runner,
@@ -190,6 +191,7 @@ pub async fn worker(
                 filters,
                 detached,
                 concurrency,
+                since,
                 cli_format,
             })
             .await
@@ -231,6 +233,7 @@ struct StartWorkerArgs {
     filters: Vec<String>,
     detached: bool,
     concurrency: u32,
+    since: Option<String>,
     cli_format: Option<CliOutputFormat>,
 }
 
@@ -244,8 +247,15 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
         filters,
         detached,
         concurrency,
+        since,
         cli_format,
     } = args;
+
+    // Parse --since into a resolved ISO timestamp
+    let resolved_since = match since {
+        Some(ref s) => Some(crate::cli::events::parse_duration_or_timestamp(s)?),
+        None => None,
+    };
 
     // Validate we have either a runner or an inline command
     let (command, final_args, final_concurrency, final_event_type) =
@@ -318,6 +328,7 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
         concurrency: final_concurrency as i32,
         instance_path,
         attach: !detached,
+        since: resolved_since,
     };
 
     let worker = client.start_worker(req).await?;

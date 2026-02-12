@@ -884,6 +884,7 @@ mod tests {
             concurrency: 2,
             instance_path: "/home/user/project".to_string(),
             attach: true,
+            since: None,
         };
 
         let json = serde_json::to_string(&req).unwrap();

@@ -1264,6 +1264,10 @@ pub enum WorkerCommand {
         /// Maximum concurrent runner instances
         #[arg(long, default_value = "1")]
         concurrency: u32,
+
+        /// Process events since duration (1h, 7d, 30m) or ISO timestamp
+        #[arg(long)]
+        since: Option<String>,
     },
 
     /// Show worker status

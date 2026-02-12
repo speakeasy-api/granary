@@ -317,6 +317,7 @@ async fn test_daemon_start_stop_worker() {
         concurrency: 1,
         instance_path: workspace_path.to_string_lossy().to_string(),
         attach: false,
+        since: None,
     };
 
     // Note: This will likely fail because the workspace doesn't have a proper granary DB

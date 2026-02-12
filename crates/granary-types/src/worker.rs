@@ -128,6 +128,8 @@ pub struct CreateWorker {
     pub concurrency: i32,
     pub instance_path: String,
     pub detached: bool,
+    /// Resolved ISO timestamp to start processing events from (ephemeral, not persisted)
+    pub since: Option<String>,
 }
 
 impl Default for CreateWorker {
@@ -141,6 +143,7 @@ impl Default for CreateWorker {
             concurrency: 1,
             instance_path: String::new(),
             detached: false,
+            since: None,
         }
     }
 }

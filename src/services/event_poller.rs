@@ -229,6 +229,7 @@ pub async fn create_poller_for_worker(
     worker: &crate::models::Worker,
     workspace_pool: SqlitePool,
     config: EventPollerConfig,
+    since: Option<String>,
 ) -> Result<EventPoller> {
     let filter_strings = worker.filters_vec();
 
@@ -238,6 +239,9 @@ pub async fn create_poller_for_worker(
             Some("1970-01-01T00:00:00Z".to_string()),
             worker.last_event_id,
         )
+    } else if let Some(since_ts) = since {
+        // New worker with --since: start from the given timestamp
+        (Some(since_ts), 0i64)
     } else {
         // New worker: start from now
         (None, 0i64)
