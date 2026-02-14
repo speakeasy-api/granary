@@ -72,11 +72,12 @@ impl Workspace {
         }
     }
 
-    /// Find the workspace using the RFC resolution order:
+    /// Find the workspace using the resolution order:
     /// 1. GRANARY_HOME env var -> explicit override
-    /// 2. Local .granary/ -> walk up from cwd, stop before $HOME
+    /// 2. Local .granary/ in cwd only (exact match)
     /// 3. Registry lookup -> deepest matching root wins
-    /// 4. Default -> ~/.granary/granary.db
+    /// 4. Local .granary/ in ancestors -> walk up from parent, stop before $HOME
+    /// 5. Default -> ~/.granary/granary.db
     pub fn find() -> Result<Self> {
         // Step 1: GRANARY_HOME env var override
         if let Ok(path) = env::var(WORKSPACE_ENV) {
@@ -107,44 +108,50 @@ impl Workspace {
 
         let cwd = env::current_dir()?;
         let home_dir = dirs::home_dir();
+        let config_dir = global_config_service::config_dir()?;
 
-        // Step 2: Walk up from cwd looking for .granary/, stop BEFORE $HOME
-        let mut current = cwd.as_path();
-        loop {
-            // Stop before $HOME — don't pick up ~/.granary as a local workspace
-            if let Some(ref home) = home_dir
-                && current == home.as_path()
-            {
-                break;
-            }
+        let registry = WorkspaceRegistry::load().ok();
+        Self::find_in(&cwd, home_dir.as_deref(), &config_dir, registry.as_ref())
+    }
 
-            let granary_dir = current.join(WORKSPACE_DIR);
+    /// Core resolution logic, parameterised for testability.
+    ///
+    /// Resolution order (after GRANARY_HOME, handled by `find`):
+    /// 1. `.granary/` in cwd (exact match)
+    /// 2. Registry lookup (deepest matching root)
+    /// 3. `.granary/` in ancestors (walk up from parent, stop before home)
+    /// 4. Default `<config_dir>/granary.db`
+    fn find_in(
+        cwd: &Path,
+        home_dir: Option<&Path>,
+        config_dir: &Path,
+        registry: Option<&WorkspaceRegistry>,
+    ) -> Result<Self> {
+        // Step 1: Check cwd only for a local .granary/ directory
+        {
+            let granary_dir = cwd.join(WORKSPACE_DIR);
             if granary_dir.exists() && granary_dir.is_dir() {
                 return Ok(Self {
                     name: None,
-                    root: current.to_path_buf(),
+                    root: cwd.to_path_buf(),
                     granary_dir: granary_dir.clone(),
                     db_path: granary_dir.join(DB_FILE),
                     mode: WorkspaceMode::Local,
                 });
             }
-
-            match current.parent() {
-                Some(parent) => current = parent,
-                None => break,
-            }
         }
 
-        // Step 3: Registry lookup — check if cwd or ancestor matches a registered root
-        if let Ok(registry) = WorkspaceRegistry::load() {
-            // lookup_root walks up from cwd and finds the deepest match
-            if let Some(workspace_name) = registry.lookup_root(&cwd)
-                && let Ok(db_path) = WorkspaceRegistry::workspace_db_path(workspace_name)
-            {
+        // Step 2: Registry lookup — check if cwd or ancestor matches a registered root
+        if let Some(registry) = registry {
+            if let Some(workspace_name) = registry.lookup_root(cwd) {
+                let db_path = config_dir
+                    .join("workspaces")
+                    .join(workspace_name)
+                    .join(DB_FILE);
                 let ws_dir = db_path.parent().unwrap().to_path_buf();
                 return Ok(Self {
                     name: Some(workspace_name.to_string()),
-                    root: cwd.clone(),
+                    root: cwd.to_path_buf(),
                     granary_dir: ws_dir,
                     db_path,
                     mode: WorkspaceMode::Named(workspace_name.to_string()),
@@ -152,17 +159,44 @@ impl Workspace {
             }
         }
 
-        // Step 4: Default — use ~/.granary/granary.db
-        let config_dir = global_config_service::config_dir()?;
+        // Step 3: Walk up from parent looking for .granary/, stop BEFORE $HOME
+        if let Some(parent) = cwd.parent() {
+            let mut current = parent;
+            loop {
+                // Stop before $HOME — don't pick up ~/.granary as a local workspace
+                if let Some(home) = home_dir
+                    && current == home
+                {
+                    break;
+                }
+
+                let granary_dir = current.join(WORKSPACE_DIR);
+                if granary_dir.exists() && granary_dir.is_dir() {
+                    return Ok(Self {
+                        name: None,
+                        root: current.to_path_buf(),
+                        granary_dir: granary_dir.clone(),
+                        db_path: granary_dir.join(DB_FILE),
+                        mode: WorkspaceMode::Local,
+                    });
+                }
+
+                match current.parent() {
+                    Some(p) => current = p,
+                    None => break,
+                }
+            }
+        }
+
+        // Step 4: Default — use <config_dir>/granary.db
         let db_path = config_dir.join(DB_FILE);
-        // Auto-create ~/.granary/ if it doesn't exist
         if !config_dir.exists() {
-            std::fs::create_dir_all(&config_dir)?;
+            std::fs::create_dir_all(config_dir)?;
         }
         Ok(Self {
             name: None,
-            root: home_dir.unwrap_or(cwd),
-            granary_dir: config_dir,
+            root: home_dir.map(Path::to_path_buf).unwrap_or(cwd.to_path_buf()),
+            granary_dir: config_dir.to_path_buf(),
             db_path,
             mode: WorkspaceMode::Default,
         })
@@ -508,5 +542,217 @@ impl DiagnosticResult {
             DiagnosticStatus::Info => "info",
             DiagnosticStatus::Fix => "fixed",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::workspace_registry::{WorkspaceMetadata, WorkspaceRegistry};
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    fn empty_registry() -> WorkspaceRegistry {
+        WorkspaceRegistry {
+            roots: HashMap::new(),
+            workspaces: HashMap::new(),
+        }
+    }
+
+    fn registry_with(roots: &[(&str, &str)]) -> WorkspaceRegistry {
+        let mut registry = empty_registry();
+        for (path, name) in roots {
+            registry.roots.insert(PathBuf::from(path), name.to_string());
+            registry
+                .workspaces
+                .entry(name.to_string())
+                .or_insert(WorkspaceMetadata {
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                });
+        }
+        registry
+    }
+
+    /// Create `.granary/` directory at the given path.
+    fn make_local_workspace(path: &Path) {
+        std::fs::create_dir_all(path.join(WORKSPACE_DIR)).unwrap();
+    }
+
+    #[test]
+    fn cwd_local_workspace_wins_over_registry() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().join("project");
+        std::fs::create_dir_all(&cwd).unwrap();
+        make_local_workspace(&cwd);
+
+        let registry = registry_with(&[(cwd.to_str().unwrap(), "my-ws")]);
+        let config_dir = tmp.path().join("config");
+
+        let ws = Workspace::find_in(&cwd, None, &config_dir, Some(&registry)).unwrap();
+
+        assert!(matches!(ws.mode, WorkspaceMode::Local));
+        assert_eq!(ws.root, cwd);
+    }
+
+    #[test]
+    fn cwd_local_workspace_wins_over_ancestor_local() {
+        let tmp = TempDir::new().unwrap();
+        let parent = tmp.path().join("parent");
+        let child = parent.join("child");
+        std::fs::create_dir_all(&child).unwrap();
+        make_local_workspace(&parent);
+        make_local_workspace(&child);
+
+        let config_dir = tmp.path().join("config");
+
+        let ws = Workspace::find_in(&child, None, &config_dir, None).unwrap();
+
+        assert!(matches!(ws.mode, WorkspaceMode::Local));
+        assert_eq!(ws.root, child);
+    }
+
+    #[test]
+    fn registry_wins_over_ancestor_local_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let parent = tmp.path().join("parent");
+        let child = parent.join("child");
+        std::fs::create_dir_all(&child).unwrap();
+        // parent has a .granary/ dir, but child does NOT
+        make_local_workspace(&parent);
+
+        let registry = registry_with(&[(child.to_str().unwrap(), "child-ws")]);
+        let config_dir = tmp.path().join("config");
+
+        let ws = Workspace::find_in(&child, None, &config_dir, Some(&registry)).unwrap();
+
+        assert!(matches!(ws.mode, WorkspaceMode::Named(ref n) if n == "child-ws"));
+    }
+
+    #[test]
+    fn registry_ancestor_match_wins_over_ancestor_local_workspace() {
+        let tmp = TempDir::new().unwrap();
+        // Tree: /grandparent/parent/child
+        //   grandparent has .granary/
+        //   parent is registered in the registry
+        //   child is cwd
+        let grandparent = tmp.path().join("grandparent");
+        let parent = grandparent.join("parent");
+        let child = parent.join("child");
+        std::fs::create_dir_all(&child).unwrap();
+        make_local_workspace(&grandparent);
+
+        let registry = registry_with(&[(parent.to_str().unwrap(), "parent-ws")]);
+        let config_dir = tmp.path().join("config");
+
+        let ws = Workspace::find_in(&child, None, &config_dir, Some(&registry)).unwrap();
+
+        // Registry match on parent should beat grandparent's .granary/
+        assert!(matches!(ws.mode, WorkspaceMode::Named(ref n) if n == "parent-ws"));
+    }
+
+    #[test]
+    fn ancestor_local_workspace_wins_over_default() {
+        let tmp = TempDir::new().unwrap();
+        let parent = tmp.path().join("parent");
+        let child = parent.join("child");
+        std::fs::create_dir_all(&child).unwrap();
+        make_local_workspace(&parent);
+
+        let config_dir = tmp.path().join("config");
+
+        let ws = Workspace::find_in(&child, None, &config_dir, None).unwrap();
+
+        assert!(matches!(ws.mode, WorkspaceMode::Local));
+        assert_eq!(ws.root, parent);
+    }
+
+    #[test]
+    fn falls_back_to_default_when_nothing_matches() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().join("bare");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let config_dir = tmp.path().join("config");
+
+        let ws = Workspace::find_in(&cwd, None, &config_dir, None).unwrap();
+
+        assert!(matches!(ws.mode, WorkspaceMode::Default));
+        assert_eq!(ws.db_path, config_dir.join(DB_FILE));
+    }
+
+    #[test]
+    fn falls_back_to_default_with_empty_registry() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().join("bare");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let registry = empty_registry();
+        let config_dir = tmp.path().join("config");
+
+        let ws = Workspace::find_in(&cwd, None, &config_dir, Some(&registry)).unwrap();
+
+        assert!(matches!(ws.mode, WorkspaceMode::Default));
+    }
+
+    #[test]
+    fn ancestor_walk_stops_before_home() {
+        let tmp = TempDir::new().unwrap();
+        // Simulate: home = /tmp/xxx/home, home has .granary/, cwd = home/a/b
+        let home = tmp.path().join("home");
+        let child = home.join("a").join("b");
+        std::fs::create_dir_all(&child).unwrap();
+        make_local_workspace(&home);
+
+        let config_dir = tmp.path().join("config");
+
+        let ws = Workspace::find_in(&child, Some(home.as_path()), &config_dir, None).unwrap();
+
+        // home's .granary/ should NOT be picked up — should fall through to default
+        assert!(matches!(ws.mode, WorkspaceMode::Default));
+    }
+
+    #[test]
+    fn ancestor_walk_finds_workspace_between_cwd_and_home() {
+        let tmp = TempDir::new().unwrap();
+        // home = /tmp/xxx/home, project = home/projects/myapp, cwd = project/src
+        let home = tmp.path().join("home");
+        let project = home.join("projects").join("myapp");
+        let cwd = project.join("src");
+        std::fs::create_dir_all(&cwd).unwrap();
+        make_local_workspace(&project);
+
+        let config_dir = tmp.path().join("config");
+
+        let ws = Workspace::find_in(&cwd, Some(home.as_path()), &config_dir, None).unwrap();
+
+        assert!(matches!(ws.mode, WorkspaceMode::Local));
+        assert_eq!(ws.root, project);
+    }
+
+    #[test]
+    fn full_resolution_order() {
+        let tmp = TempDir::new().unwrap();
+        // Tree: /root/mid/leaf
+        //   root has .granary/
+        //   mid is registered in registry
+        //   leaf is cwd (no .granary/)
+        let root = tmp.path().join("root");
+        let mid = root.join("mid");
+        let leaf = mid.join("leaf");
+        std::fs::create_dir_all(&leaf).unwrap();
+        make_local_workspace(&root);
+
+        let registry = registry_with(&[(mid.to_str().unwrap(), "mid-ws")]);
+        let config_dir = tmp.path().join("config");
+
+        // Without cwd .granary/ → registry should win over root's .granary/
+        let ws = Workspace::find_in(&leaf, None, &config_dir, Some(&registry)).unwrap();
+        assert!(matches!(ws.mode, WorkspaceMode::Named(ref n) if n == "mid-ws"));
+
+        // Now give leaf its own .granary/ → cwd local should win
+        make_local_workspace(&leaf);
+        let ws = Workspace::find_in(&leaf, None, &config_dir, Some(&registry)).unwrap();
+        assert!(matches!(ws.mode, WorkspaceMode::Local));
+        assert_eq!(ws.root, leaf);
     }
 }

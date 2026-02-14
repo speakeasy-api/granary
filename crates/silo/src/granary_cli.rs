@@ -3,8 +3,8 @@
 use tracing::error;
 
 use granary_types::{
-    Comment, Initiative, InitiativeSummary, Project, Run, RunnerConfig, Task as GranaryTask,
-    TaskDependency, TaskPriority, TaskStatus, Worker,
+    ActionConfig, Comment, Initiative, InitiativeSummary, Project, Run, RunnerConfig,
+    Task as GranaryTask, TaskDependency, TaskPriority, TaskStatus, Worker,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -485,6 +485,142 @@ pub async fn update_runner(
 pub async fn remove_runner(workspace: PathBuf, name: String) -> Result<(), String> {
     run_granary(&workspace, &["config", "runners", "rm", &name]).await?;
     Ok(())
+}
+
+// =============================================================================
+// Action Management
+// =============================================================================
+
+/// List all configured actions
+pub async fn list_actions(workspace: PathBuf) -> Result<HashMap<String, ActionConfig>, String> {
+    let output = run_granary(&workspace, &["config", "actions", "--json"]).await?;
+    parse_json_logged(&output, "config actions --json")
+}
+
+/// Add a new action configuration
+pub async fn add_action(
+    workspace: PathBuf,
+    name: String,
+    command: String,
+    args: Option<Vec<String>>,
+    on_event: Option<String>,
+    concurrency: Option<u32>,
+    env: Option<HashMap<String, String>>,
+) -> Result<(), String> {
+    let mut cmd_args = vec!["config", "actions", "add", &name, "--command", &command];
+
+    let args_strs: Vec<String>;
+    if let Some(ref a) = args {
+        args_strs = a.clone();
+        for arg in &args_strs {
+            cmd_args.push("-a");
+            cmd_args.push(arg);
+        }
+    }
+
+    let on_flag;
+    if let Some(ref o) = on_event {
+        on_flag = o.as_str();
+        cmd_args.push("--on");
+        cmd_args.push(on_flag);
+    }
+
+    let concurrency_str;
+    if let Some(c) = concurrency {
+        concurrency_str = c.to_string();
+        cmd_args.push("--concurrency");
+        cmd_args.push(&concurrency_str);
+    }
+
+    let env_strs: Vec<String>;
+    if let Some(ref e) = env {
+        env_strs = e.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+        for env_str in &env_strs {
+            cmd_args.push("-e");
+            cmd_args.push(env_str);
+        }
+    }
+
+    run_granary(&workspace, &cmd_args).await?;
+    Ok(())
+}
+
+/// Update an existing action configuration
+pub async fn update_action(
+    workspace: PathBuf,
+    name: String,
+    command: Option<String>,
+    args: Option<Vec<String>>,
+    on_event: Option<String>,
+    concurrency: Option<u32>,
+    env: Option<HashMap<String, String>>,
+) -> Result<(), String> {
+    let mut cmd_args = vec!["config", "actions", "update", &name];
+
+    let command_flag;
+    if let Some(ref c) = command {
+        command_flag = c.as_str();
+        cmd_args.push("--command");
+        cmd_args.push(command_flag);
+    }
+
+    let args_strs: Vec<String>;
+    if let Some(ref a) = args {
+        args_strs = a.clone();
+        for arg in &args_strs {
+            cmd_args.push("-a");
+            cmd_args.push(arg);
+        }
+    }
+
+    let on_flag;
+    if let Some(ref o) = on_event {
+        on_flag = o.as_str();
+        cmd_args.push("--on");
+        cmd_args.push(on_flag);
+    }
+
+    let concurrency_str;
+    if let Some(c) = concurrency {
+        concurrency_str = c.to_string();
+        cmd_args.push("--concurrency");
+        cmd_args.push(&concurrency_str);
+    }
+
+    let env_strs: Vec<String>;
+    if let Some(ref e) = env {
+        env_strs = e.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+        for env_str in &env_strs {
+            cmd_args.push("-e");
+            cmd_args.push(env_str);
+        }
+    }
+
+    run_granary(&workspace, &cmd_args).await?;
+    Ok(())
+}
+
+/// Remove an action configuration
+pub async fn remove_action(workspace: PathBuf, name: String) -> Result<(), String> {
+    run_granary(&workspace, &["config", "actions", "rm", &name]).await?;
+    Ok(())
+}
+
+/// Start a worker using a configured action
+pub async fn start_worker_from_action(
+    workspace: PathBuf,
+    action_name: String,
+    detached: bool,
+) -> Result<Worker, String> {
+    let mut args = vec!["worker", "start", "--action", &action_name, "--json"];
+    if detached {
+        args.push("-d");
+    }
+    let output = run_granary(&workspace, &args).await?;
+    parse_json_logged(
+        &output,
+        &format!("worker start --action {} --json", action_name),
+    )
 }
 
 // =============================================================================

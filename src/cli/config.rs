@@ -1,7 +1,9 @@
-use crate::cli::args::{CliOutputFormat, ConfigAction, RunnersAction, SteeringAction};
+use crate::cli::args::{
+    ActionsAction, CliOutputFormat, ConfigAction, RunnersAction, SteeringAction,
+};
 use crate::db;
 use crate::error::Result;
-use crate::models::RunnerConfig;
+use crate::models::{ActionConfig, RunnerConfig};
 use crate::output::Output;
 use crate::services::{Workspace, global_config_service};
 use std::collections::HashMap;
@@ -185,6 +187,10 @@ pub async fn config(action: ConfigAction, format: Option<CliOutputFormat>) -> Re
         ConfigAction::Runners { action } => {
             handle_runners_action(action, format).await?;
         }
+
+        ConfigAction::Actions { action } => {
+            handle_actions_action(action, format).await?;
+        }
     }
 
     Ok(())
@@ -324,6 +330,242 @@ impl Output for RunnerRmOutput {
     }
 }
 
+/// Output for `config actions` (list) - all configured actions
+pub struct ActionsListOutput {
+    pub actions: Vec<(String, ActionConfig)>,
+}
+
+impl Output for ActionsListOutput {
+    fn to_json(&self) -> String {
+        let map: HashMap<&str, &ActionConfig> =
+            self.actions.iter().map(|(n, a)| (n.as_str(), a)).collect();
+        serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.actions.is_empty() {
+            "No actions configured.".to_string()
+        } else {
+            self.actions
+                .iter()
+                .map(|(name, action)| {
+                    format!(
+                        "- `{}` -> `{} {}`",
+                        name,
+                        action.command,
+                        action.args.join(" ")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.actions.is_empty() {
+            "No actions configured.\n\nAdd an action with:\n  granary config actions add <name> --command <cmd>".to_string()
+        } else {
+            let mut lines = vec!["Configured actions:\n".to_string()];
+            for (name, action) in &self.actions {
+                lines.push(format!(
+                    "  {} -> {} {}",
+                    name,
+                    action.command,
+                    action.args.join(" ")
+                ));
+                if let Some(c) = action.concurrency {
+                    lines.push(format!("    concurrency: {}", c));
+                }
+                if let Some(ref on) = action.on {
+                    lines.push(format!("    on: {}", on));
+                }
+                if !action.env.is_empty() {
+                    lines.push(format!(
+                        "    env: {}",
+                        action
+                            .env
+                            .iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
+            lines.join("\n")
+        }
+    }
+}
+
+/// Output for `config actions show` - single action details
+pub struct ActionShowOutput {
+    pub name: String,
+    pub action: ActionConfig,
+}
+
+impl Output for ActionShowOutput {
+    fn to_json(&self) -> String {
+        serde_json::json!({"name": &self.name, "action": &self.action}).to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        format!(
+            "Action `{}`:\n- command: `{}`",
+            self.name, self.action.command
+        )
+    }
+
+    fn to_text(&self) -> String {
+        let mut lines = vec![
+            format!("Action: {}\n", self.name),
+            format!("  command: {}", self.action.command),
+        ];
+        if !self.action.args.is_empty() {
+            lines.push(format!("  args: {:?}", self.action.args));
+        }
+        if let Some(c) = self.action.concurrency {
+            lines.push(format!("  concurrency: {}", c));
+        }
+        if let Some(ref on) = self.action.on {
+            lines.push(format!("  on: {}", on));
+        }
+        if !self.action.env.is_empty() {
+            lines.push("  env:".to_string());
+            for (k, v) in &self.action.env {
+                lines.push(format!("    {}={}", k, v));
+            }
+        }
+        lines.join("\n")
+    }
+}
+
+/// Output for `config actions rm` - removal confirmation
+pub struct ActionRmOutput {
+    pub name: String,
+    pub removed: bool,
+}
+
+impl Output for ActionRmOutput {
+    fn to_json(&self) -> String {
+        serde_json::json!({"status": if self.removed { "removed" } else { "not_found" }, "name": &self.name}).to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        if self.removed {
+            format!("Removed action `{}`", self.name)
+        } else {
+            format!("Action not found: `{}`", self.name)
+        }
+    }
+
+    fn to_text(&self) -> String {
+        if self.removed {
+            format!("Removed action: {}", self.name)
+        } else {
+            format!("Action not found: {}", self.name)
+        }
+    }
+}
+
+/// Handle actions subcommands
+async fn handle_actions_action(
+    action: Option<ActionsAction>,
+    format: Option<CliOutputFormat>,
+) -> Result<()> {
+    match action {
+        None => {
+            // List all actions (inline + file-based)
+            let actions = global_config_service::list_all_actions()?;
+            let output = ActionsListOutput { actions };
+            println!("{}", output.format(format));
+        }
+
+        Some(ActionsAction::Add {
+            name,
+            command,
+            args,
+            concurrency,
+            on,
+            env_vars,
+        }) => {
+            let env = parse_env_vars(&env_vars);
+            let action = ActionConfig {
+                command,
+                args,
+                concurrency,
+                on,
+                env,
+                action: None,
+            };
+            global_config_service::set_action(&name, action)?;
+            println!("Added action: {}", name);
+        }
+
+        Some(ActionsAction::Update {
+            name,
+            command,
+            args,
+            concurrency,
+            on,
+            env_vars,
+        }) => {
+            let existing = global_config_service::get_action(&name)?;
+            match existing {
+                Some(mut action) => {
+                    if let Some(cmd) = command {
+                        action.command = cmd;
+                    }
+                    if let Some(a) = args {
+                        action.args = a;
+                    }
+                    if concurrency.is_some() {
+                        action.concurrency = concurrency;
+                    }
+                    if on.is_some() {
+                        action.on = on;
+                    }
+                    if let Some(env_vec) = env_vars {
+                        action.env = parse_env_vars(&env_vec);
+                    }
+                    global_config_service::set_action(&name, action)?;
+                    println!("Updated action: {}", name);
+                }
+                None => {
+                    println!("Action not found: {}", name);
+                    std::process::exit(3);
+                }
+            }
+        }
+
+        Some(ActionsAction::Rm { name }) => {
+            let removed = global_config_service::remove_action(&name)?;
+            let output = ActionRmOutput {
+                name: name.clone(),
+                removed,
+            };
+            println!("{}", output.format(format));
+            if !removed {
+                std::process::exit(3);
+            }
+        }
+
+        Some(ActionsAction::Show { name }) => match global_config_service::get_action(&name)? {
+            Some(action) => {
+                let output = ActionShowOutput {
+                    name: name.clone(),
+                    action,
+                };
+                println!("{}", output.format(format));
+            }
+            None => {
+                println!("Action not found: {}", name);
+                std::process::exit(3);
+            }
+        },
+    }
+
+    Ok(())
+}
+
 /// Handle runners subcommands
 async fn handle_runners_action(
     action: Option<RunnersAction>,
@@ -354,6 +596,7 @@ async fn handle_runners_action(
                 concurrency,
                 on,
                 env,
+                action: None,
             };
             global_config_service::set_runner(&name, runner)?;
             println!("Added runner: {}", name);

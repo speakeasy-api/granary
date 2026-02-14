@@ -1034,6 +1034,12 @@ pub enum ConfigAction {
         #[command(subcommand)]
         action: Option<RunnersAction>,
     },
+
+    /// Manage global actions configuration
+    Actions {
+        #[command(subcommand)]
+        action: Option<ActionsAction>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1099,6 +1105,73 @@ pub enum RunnersAction {
     /// Show a specific runner configuration
     Show {
         /// Runner name
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ActionsAction {
+    /// Add or update an action configuration
+    Add {
+        /// Action name
+        name: String,
+
+        /// Command to execute
+        #[arg(long)]
+        command: String,
+
+        /// Arguments (can be specified multiple times)
+        #[arg(long = "arg", short = 'a')]
+        args: Vec<String>,
+
+        /// Maximum concurrent executions
+        #[arg(long)]
+        concurrency: Option<u32>,
+
+        /// Default event type this action responds to
+        #[arg(long)]
+        on: Option<String>,
+
+        /// Environment variables (KEY=VALUE format, can be specified multiple times)
+        #[arg(long = "env", short = 'e')]
+        env_vars: Vec<String>,
+    },
+
+    /// Update an existing action
+    Update {
+        /// Action name
+        name: String,
+
+        /// New command to execute
+        #[arg(long)]
+        command: Option<String>,
+
+        /// Arguments (replaces existing if provided)
+        #[arg(long = "arg", short = 'a')]
+        args: Option<Vec<String>>,
+
+        /// Maximum concurrent executions
+        #[arg(long)]
+        concurrency: Option<u32>,
+
+        /// Default event type this action responds to
+        #[arg(long)]
+        on: Option<String>,
+
+        /// Environment variables (KEY=VALUE format, replaces existing if provided)
+        #[arg(long = "env", short = 'e')]
+        env_vars: Option<Vec<String>>,
+    },
+
+    /// Remove an action configuration
+    Rm {
+        /// Action name
+        name: String,
+    },
+
+    /// Show a specific action configuration
+    Show {
+        /// Action name
         name: String,
     },
 }
@@ -1238,8 +1311,12 @@ pub enum WorkerCommand {
     #[command(visible_alias = "begin")]
     Start {
         /// Runner name from config
-        #[arg(long)]
+        #[arg(long, conflicts_with = "action")]
         runner: Option<String>,
+
+        /// Action name from config
+        #[arg(long, conflicts_with = "runner")]
+        action: Option<String>,
 
         /// Inline command to execute
         #[arg(long)]

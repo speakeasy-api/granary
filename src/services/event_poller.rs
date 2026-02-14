@@ -118,8 +118,14 @@ impl EventPoller {
     ///
     /// Uses claim-based consumption: each event is atomically claimed
     /// and returned. No double-processing is possible.
-    pub async fn poll(&mut self) -> Result<Vec<Event>> {
-        self.consumer.poll(self.config.batch_size).await
+    ///
+    /// The `limit` parameter overrides the configured batch_size when provided.
+    /// This is used by the worker runtime to only claim as many events as it
+    /// has available concurrency slots, preventing events from being claimed
+    /// but never processed.
+    pub async fn poll(&mut self, limit: Option<usize>) -> Result<Vec<Event>> {
+        let batch_size = limit.or(self.config.batch_size);
+        self.consumer.poll(batch_size).await
     }
 
     /// Manually acknowledge processing up to a specific event ID.
@@ -138,7 +144,7 @@ impl EventPoller {
                 return Ok(());
             }
 
-            match self.poll().await {
+            match self.poll(None).await {
                 Ok(events) => {
                     for event in events {
                         if tx.send(event).await.is_err() {
@@ -176,7 +182,7 @@ impl EventPoller {
                 return Ok(());
             }
 
-            match self.poll().await {
+            match self.poll(None).await {
                 Ok(events) => {
                     for event in events {
                         if tx.send(event).await.is_err() {

@@ -4,25 +4,27 @@ use iced::{Background, Element, Length, Subscription, Task};
 use crate::appearance::{self, Palette};
 use crate::config::SiloConfig;
 use crate::granary_cli::{
-    add_comment, add_dependency, add_runner, add_steering, archive_initiative, archive_project,
-    block_task, complete_task, create_project, create_task, create_task_full, delete_config,
-    list_config, list_runners, list_steering, load_comments, load_initiative_summary,
-    load_initiatives, load_projects, load_run_logs, load_runs, load_task, load_tasks,
-    load_worker_logs, load_workers, pause_run, prune_workers, ready_project, remove_runner,
-    remove_steering, reopen_task, resume_run, set_config, start_task, start_worker_from_runner,
-    start_worker_inline, stop_run, stop_worker, unarchive_project, update_project, update_runner,
-    update_task,
+    add_action, add_comment, add_dependency, add_runner, add_steering, archive_initiative,
+    archive_project, block_task, complete_task, create_project, create_task, create_task_full,
+    delete_config, list_actions, list_config, list_runners, list_steering, load_comments,
+    load_initiative_summary, load_initiatives, load_projects, load_run_logs, load_runs, load_task,
+    load_tasks, load_worker_logs, load_workers, pause_run, prune_workers, ready_project,
+    remove_action, remove_runner, remove_steering, reopen_task, resume_run, set_config, start_task,
+    start_worker_from_action, start_worker_from_runner, start_worker_inline, stop_run, stop_worker,
+    unarchive_project, update_action, update_project, update_runner, update_task,
 };
 use crate::message::{Message, SteeringFile, TaskFilter};
 use crate::screen;
 use crate::screen::create_task::CreateTaskForm;
 use crate::screen::edit_task::EditTaskForm;
-use crate::screen::settings::{ConfigFormState, RunnerFormState, SteeringFormState};
+use crate::screen::settings::{
+    ActionFormState, ConfigFormState, RunnerFormState, SteeringFormState,
+};
 use crate::screen::tasks::TaskViewMode;
 use crate::widget::{self, icon};
 use granary_types::{
-    Comment, Initiative, InitiativeSummary, Project, Run, RunnerConfig, Task as GranaryTask,
-    TaskDependency, Worker,
+    ActionConfig, Comment, Initiative, InitiativeSummary, Project, Run, RunnerConfig,
+    Task as GranaryTask, TaskDependency, Worker,
 };
 use lucide_icons::Icon;
 use std::collections::{HashMap, HashSet};
@@ -94,9 +96,11 @@ pub struct Silo {
 
     // Settings state
     runners: Vec<(String, RunnerConfig)>,
+    actions: Vec<(String, ActionConfig)>,
     steering_files: Vec<SteeringFile>,
     config_entries: Vec<(String, String)>,
     runner_form: RunnerFormState,
+    action_form: ActionFormState,
     steering_form: SteeringFormState,
     config_form: ConfigFormState,
 
@@ -193,9 +197,11 @@ impl Silo {
 
             // Settings state
             runners: Vec::new(),
+            actions: Vec::new(),
             steering_files: Vec::new(),
             config_entries: Vec::new(),
             runner_form: RunnerFormState::default(),
+            action_form: ActionFormState::default(),
             steering_form: SteeringFormState::default(),
             config_form: ConfigFormState::default(),
 
@@ -305,6 +311,7 @@ impl Silo {
                             self.workers_loading = true;
                             let ws1 = ws.clone();
                             let ws2 = ws.clone();
+                            let ws3 = ws.clone();
                             return Task::batch([
                                 Task::perform(
                                     async move {
@@ -315,7 +322,15 @@ impl Silo {
                                     Message::RunnersLoaded,
                                 ),
                                 Task::perform(
-                                    async move { load_workers(ws2, true).await },
+                                    async move {
+                                        list_actions(ws2)
+                                            .await
+                                            .map(|map| map.into_iter().collect::<Vec<_>>())
+                                    },
+                                    Message::ActionsLoaded,
+                                ),
+                                Task::perform(
+                                    async move { load_workers(ws3, true).await },
                                     Message::WorkersLoaded,
                                 ),
                             ]);
@@ -332,6 +347,7 @@ impl Silo {
                             let ws1 = ws.clone();
                             let ws2 = ws.clone();
                             let ws3 = ws.clone();
+                            let ws4 = ws.clone();
                             return Task::batch([
                                 Task::perform(
                                     async move {
@@ -343,7 +359,15 @@ impl Silo {
                                 ),
                                 Task::perform(
                                     async move {
-                                        list_steering(ws2).await.map(|files| {
+                                        list_actions(ws2)
+                                            .await
+                                            .map(|map| map.into_iter().collect::<Vec<_>>())
+                                    },
+                                    Message::ActionsLoaded,
+                                ),
+                                Task::perform(
+                                    async move {
+                                        list_steering(ws3).await.map(|files| {
                                             files
                                                 .into_iter()
                                                 .map(|f| SteeringFile {
@@ -360,7 +384,7 @@ impl Silo {
                                 ),
                                 Task::perform(
                                     async move {
-                                        list_config(ws3).await.map(|entries| {
+                                        list_config(ws4).await.map(|entries| {
                                             entries.into_iter().map(|e| (e.key, e.value)).collect()
                                         })
                                     },
@@ -945,6 +969,141 @@ impl Silo {
                 }
                 Task::none()
             }
+            // ========== Action management ==========
+            Message::LoadActions => {
+                if let Some(ws) = &self.workspace {
+                    self.loading = true;
+                    let ws = ws.clone();
+                    return Task::perform(
+                        async move {
+                            list_actions(ws)
+                                .await
+                                .map(|map| map.into_iter().collect::<Vec<_>>())
+                        },
+                        Message::ActionsLoaded,
+                    );
+                }
+                Task::none()
+            }
+            Message::ActionsLoaded(result) => {
+                self.loading = false;
+                match result {
+                    Ok(actions) => self.actions = actions,
+                    Err(e) => self.status_message = Some(e),
+                }
+                Task::none()
+            }
+            Message::ActionFormChanged { field, value } => {
+                match field.as_str() {
+                    "name" => self.action_form.name = value,
+                    "command" => self.action_form.command = value,
+                    "args" => self.action_form.args = value,
+                    "on" => self.action_form.on_event = value,
+                    "concurrency" => self.action_form.concurrency = value,
+                    _ => {}
+                }
+                Task::none()
+            }
+            Message::EditAction(name) => {
+                if let Some((_, config)) = self.actions.iter().find(|(n, _)| n == &name) {
+                    self.action_form = ActionFormState {
+                        name: name.clone(),
+                        command: config.command.clone(),
+                        args: config.args.join(", "),
+                        concurrency: config
+                            .concurrency
+                            .map(|c| c.to_string())
+                            .unwrap_or_default(),
+                        on_event: config.on.clone().unwrap_or_default(),
+                        editing: Some(name),
+                    };
+                }
+                Task::none()
+            }
+            Message::CancelEditAction => {
+                self.action_form = ActionFormState::default();
+                Task::none()
+            }
+            Message::SaveAction => {
+                if let Some(ws) = &self.workspace {
+                    if self.action_form.name.is_empty() || self.action_form.command.is_empty() {
+                        return Task::none();
+                    }
+                    self.loading = true;
+                    let ws = ws.clone();
+                    let name = self.action_form.name.clone();
+                    let command = self.action_form.command.clone();
+                    let args = if self.action_form.args.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            self.action_form
+                                .args
+                                .split(',')
+                                .map(|s| s.trim().to_string())
+                                .collect(),
+                        )
+                    };
+                    let on_event = if self.action_form.on_event.is_empty() {
+                        None
+                    } else {
+                        Some(self.action_form.on_event.clone())
+                    };
+                    let concurrency = self.action_form.concurrency.parse().ok();
+                    let is_edit = self.action_form.editing.is_some();
+                    return Task::perform(
+                        async move {
+                            if is_edit {
+                                update_action(
+                                    ws,
+                                    name,
+                                    Some(command),
+                                    args,
+                                    on_event,
+                                    concurrency,
+                                    None,
+                                )
+                                .await
+                            } else {
+                                add_action(ws, name, command, args, on_event, concurrency, None)
+                                    .await
+                            }
+                        },
+                        Message::ActionSaved,
+                    );
+                }
+                Task::none()
+            }
+            Message::ActionSaved(result) => {
+                self.loading = false;
+                if let Err(e) = result {
+                    self.status_message = Some(e);
+                } else {
+                    self.action_form = ActionFormState::default();
+                    return self.update(Message::LoadActions);
+                }
+                Task::none()
+            }
+            Message::DeleteAction(name) => {
+                if let Some(ws) = &self.workspace {
+                    self.loading = true;
+                    let ws = ws.clone();
+                    return Task::perform(
+                        async move { remove_action(ws, name).await },
+                        Message::ActionDeleted,
+                    );
+                }
+                Task::none()
+            }
+            Message::ActionDeleted(result) => {
+                self.loading = false;
+                if let Err(e) = result {
+                    self.status_message = Some(e);
+                } else {
+                    return self.update(Message::LoadActions);
+                }
+                Task::none()
+            }
             Message::LoadSteering => {
                 if let Some(ws) = &self.workspace {
                     self.loading = true;
@@ -1102,6 +1261,7 @@ impl Silo {
                 if let Some(ws) = &self.workspace {
                     let ws1 = ws.clone();
                     let ws2 = ws.clone();
+                    let ws3 = ws.clone();
                     Task::batch([
                         Task::perform(
                             async move {
@@ -1112,7 +1272,15 @@ impl Silo {
                             Message::RunnersLoaded,
                         ),
                         Task::perform(
-                            async move { load_workers(ws2, true).await },
+                            async move {
+                                list_actions(ws2)
+                                    .await
+                                    .map(|map| map.into_iter().collect::<Vec<_>>())
+                            },
+                            Message::ActionsLoaded,
+                        ),
+                        Task::perform(
+                            async move { load_workers(ws3, true).await },
                             Message::WorkersLoaded,
                         ),
                     ])
@@ -1144,6 +1312,7 @@ impl Silo {
                 if let Some(ws) = &self.workspace {
                     let ws1 = ws.clone();
                     let ws2 = ws.clone();
+                    let ws3 = ws.clone();
                     Task::batch([
                         Task::perform(
                             async move {
@@ -1154,7 +1323,15 @@ impl Silo {
                             Message::RunnersLoaded,
                         ),
                         Task::perform(
-                            async move { load_workers(ws2, true).await },
+                            async move {
+                                list_actions(ws2)
+                                    .await
+                                    .map(|map| map.into_iter().collect::<Vec<_>>())
+                            },
+                            Message::ActionsLoaded,
+                        ),
+                        Task::perform(
+                            async move { load_workers(ws3, true).await },
                             Message::WorkersLoaded,
                         ),
                     ])
@@ -1177,6 +1354,37 @@ impl Silo {
                 if let Some((_, config)) = self.runners.iter().find(|(n, _)| n == &name) {
                     self.start_worker_form = StartWorkerForm {
                         from_runner: Some(name),
+                        command: config.command.clone(),
+                        args: config.args.join("\n"),
+                        event_type: config.on.clone().unwrap_or_default(),
+                        concurrency: config
+                            .concurrency
+                            .map(|c| c.to_string())
+                            .unwrap_or("1".into()),
+                        poll_cooldown: "300".into(),
+                        detached: true,
+                        ..Default::default()
+                    };
+                }
+                self.screen_history.push(self.screen.clone());
+                self.screen = screen::Screen::StartWorker;
+                Task::none()
+            }
+            Message::QuickStartAction(name) => {
+                if let Some(ws) = &self.workspace {
+                    self.workers_loading = true;
+                    Task::perform(
+                        start_worker_from_action(ws.clone(), name, true),
+                        Message::WorkerStarted,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::OpenCustomizeAction(name) => {
+                if let Some((_, config)) = self.actions.iter().find(|(n, _)| n == &name) {
+                    self.start_worker_form = StartWorkerForm {
+                        from_runner: None,
                         command: config.command.clone(),
                         args: config.args.join("\n"),
                         event_type: config.on.clone().unwrap_or_default(),
@@ -2734,6 +2942,7 @@ impl Silo {
             screen::Screen::Workers => {
                 let state = screen::workers::WorkersScreenState {
                     runners: &self.runners,
+                    actions: &self.actions,
                     workers: &self.workers,
                     workspace: self.workspace.as_ref(),
                     loading: self.workers_loading,
@@ -2745,6 +2954,7 @@ impl Silo {
                 // Use workers screen for worker detail
                 let state = screen::workers::WorkersScreenState {
                     runners: &self.runners,
+                    actions: &self.actions,
                     workers: &self.workers,
                     workspace: self.workspace.as_ref(),
                     loading: self.workers_loading,
@@ -2804,10 +3014,12 @@ impl Silo {
             screen::Screen::Settings => {
                 let state = screen::settings::SettingsScreenState {
                     runners: &self.runners,
+                    actions: &self.actions,
                     steering_files: &self.steering_files,
                     config_entries: &self.config_entries,
                     loading: self.loading,
                     runner_form: &self.runner_form,
+                    action_form: &self.action_form,
                     steering_form: &self.steering_form,
                     config_form: &self.config_form,
                 };

@@ -1,6 +1,6 @@
 use granary_types::{
-    Comment, Initiative, InitiativeSummary, Project, Run, RunnerConfig, Task as GranaryTask,
-    TaskPriority, TaskStatus, Worker,
+    ActionConfig, Comment, Initiative, InitiativeSummary, Project, Run, RunnerConfig,
+    Task as GranaryTask, TaskPriority, TaskStatus, Worker,
 };
 use iced::widget::text_editor;
 use std::path::PathBuf;
@@ -334,6 +334,32 @@ pub enum Message {
     DeleteRunner(String),
     /// Runner deleted result
     RunnerDeleted(Result<(), String>),
+
+    // Settings - Actions
+    /// Load actions list from global config
+    LoadActions,
+    /// Actions loaded from CLI
+    ActionsLoaded(Result<Vec<(String, ActionConfig)>, String>),
+    /// Add new action form field changed
+    ActionFormChanged { field: String, value: String },
+    /// Edit an existing action (populate form with action data)
+    EditAction(String),
+    /// Cancel editing and reset action form
+    CancelEditAction,
+    /// Save new/edited action
+    SaveAction,
+    /// Action saved result
+    ActionSaved(Result<(), String>),
+    /// Delete an action by name
+    DeleteAction(String),
+    /// Action deleted result
+    ActionDeleted(Result<(), String>),
+
+    // Worker actions from actions
+    /// Quick-start an action with default settings
+    QuickStartAction(String),
+    /// Open customize form pre-filled with action settings
+    OpenCustomizeAction(String),
 
     // Settings - Steering
     /// Load steering files list

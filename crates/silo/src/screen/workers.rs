@@ -8,7 +8,7 @@
 use crate::appearance::{self, CORNER_RADIUS_SMALL, Palette};
 use crate::message::Message;
 use crate::widget;
-use granary_types::{RunnerConfig, Worker, WorkerStatus};
+use granary_types::{ActionConfig, RunnerConfig, Worker, WorkerStatus};
 use iced::border::Radius;
 use iced::widget::{
     Column, Row, Space, button, column, container, horizontal_space, row, scrollable, text,
@@ -23,6 +23,7 @@ use std::path::PathBuf;
 /// borrowed from the main application state.
 pub struct WorkersScreenState<'a> {
     pub runners: &'a [(String, RunnerConfig)],
+    pub actions: &'a [(String, ActionConfig)],
     pub workers: &'a [Worker],
     pub workspace: Option<&'a PathBuf>,
     pub loading: bool,
@@ -32,12 +33,15 @@ pub struct WorkersScreenState<'a> {
 pub fn view<'a>(state: WorkersScreenState<'a>, palette: &'a Palette) -> Element<'a, Message> {
     let header = view_header(palette);
     let runners_section = view_runners_section(state.runners, palette);
+    let actions_section = view_actions_section(state.actions, palette);
     let workers_section = view_workers_section(state.workers, state.workspace, palette);
 
     let content = column![
         header,
         Space::with_height(24),
         runners_section,
+        Space::with_height(24),
+        actions_section,
         Space::with_height(24),
         workers_section,
     ]
@@ -87,6 +91,122 @@ fn view_runners_section<'a>(
     let section = column![header, Space::with_height(12), content].width(Length::Fill);
 
     widget::card(section, palette)
+}
+
+/// Renders the Available Actions section.
+fn view_actions_section<'a>(
+    actions: &'a [(String, ActionConfig)],
+    palette: &'a Palette,
+) -> Element<'a, Message> {
+    let header = text("Available Actions")
+        .size(14)
+        .color(palette.text_secondary);
+
+    let content: Element<'a, Message> = if actions.is_empty() {
+        container(
+            text("No actions configured. Add actions in Settings.")
+                .size(14)
+                .color(palette.text_muted),
+        )
+        .padding(24)
+        .center_x(Length::Fill)
+        .into()
+    } else {
+        let items: Vec<Element<'a, Message>> = actions
+            .iter()
+            .map(|(name, config)| action_card(name, config, palette))
+            .collect();
+
+        scrollable(Column::from_vec(items).spacing(8).width(Length::Fill))
+            .height(Length::FillPortion(1))
+            .into()
+    };
+
+    let section = column![header, Space::with_height(12), content].width(Length::Fill);
+
+    widget::card(section, palette)
+}
+
+/// Renders an action card with name, command, and action buttons.
+fn action_card<'a>(
+    name: &'a str,
+    config: &'a ActionConfig,
+    palette: &'a Palette,
+) -> Element<'a, Message> {
+    let status_dot = container(Space::new(8, 8)).style(move |_| container::Style {
+        background: Some(Background::Color(palette.accent)),
+        border: Border {
+            radius: Radius::from(4.0),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let action_name = text(name).size(14).color(palette.text);
+
+    let command_preview = if config.args.is_empty() {
+        config.command.clone()
+    } else {
+        format!("{} {}", config.command, config.args.join(" "))
+    };
+    let command_text = text(command_preview)
+        .size(12)
+        .color(palette.text_muted)
+        .font(iced::Font::MONOSPACE);
+
+    let event_type = config.on.as_deref().unwrap_or("task.next");
+    let concurrency = config.concurrency.unwrap_or(1);
+    let info_text = text(format!(
+        "Event: {} • Concurrency: {}",
+        event_type, concurrency
+    ))
+    .size(11)
+    .color(palette.text_muted);
+
+    let start_btn = action_button_primary(
+        "▶ Start",
+        Message::QuickStartAction(name.to_string()),
+        palette,
+    );
+    let customize_btn = widget::action_button(
+        "Customize...",
+        Message::OpenCustomizeAction(name.to_string()),
+        palette,
+    );
+
+    let content = column![
+        row![status_dot, Space::with_width(8), action_name].align_y(iced::Alignment::Center),
+        command_text,
+        info_text,
+        Space::with_height(8),
+        row![start_btn, customize_btn].spacing(8),
+    ]
+    .spacing(4)
+    .width(Length::Fill);
+
+    let bg = palette.card;
+    let bg_hover = palette.card_hover;
+    let border = palette.border;
+    let border_hover = palette.border_hover;
+
+    button(container(content).padding(16).width(Length::Fill))
+        .style(move |_, status| {
+            let (bg_color, border_color) = match status {
+                button::Status::Hovered => (bg_hover, border_hover),
+                _ => (bg, border),
+            };
+            button::Style {
+                background: Some(Background::Color(bg_color)),
+                border: Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: Radius::from(appearance::CORNER_RADIUS),
+                },
+                ..Default::default()
+            }
+        })
+        .width(Length::Fill)
+        .into()
 }
 
 /// Sort workers by status and creation time.

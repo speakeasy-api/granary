@@ -13,7 +13,7 @@ use iced::widget::{
 };
 use iced::{Background, Border, Color, Element, Length, Padding as IcedPadding, Theme};
 
-use granary_types::RunnerConfig;
+use granary_types::{ActionConfig, RunnerConfig};
 
 /// Form state for adding/editing a runner
 #[derive(Debug, Clone, Default)]
@@ -29,6 +29,23 @@ pub struct RunnerFormState {
     /// Event type the runner responds to (e.g., task.next, task.start)
     pub on_event: String,
     /// Some(name) if editing existing runner, None if creating new
+    pub editing: Option<String>,
+}
+
+/// Form state for adding/editing an action
+#[derive(Debug, Clone, Default)]
+pub struct ActionFormState {
+    /// Action name (unique identifier)
+    pub name: String,
+    /// Command to execute
+    pub command: String,
+    /// Arguments (supports ${VAR} expansion, shown as hint)
+    pub args: String,
+    /// Concurrency limit (stored as string for input, parsed on save)
+    pub concurrency: String,
+    /// Event type the action responds to (e.g., task.next, task.start)
+    pub on_event: String,
+    /// Some(name) if editing existing action, None if creating new
     pub editing: Option<String>,
 }
 
@@ -56,6 +73,8 @@ pub struct ConfigFormState {
 pub struct SettingsScreenState<'a> {
     /// List of runner configurations (name, config)
     pub runners: &'a [(String, RunnerConfig)],
+    /// List of action configurations (name, config)
+    pub actions: &'a [(String, ActionConfig)],
     /// List of steering files
     pub steering_files: &'a [SteeringFile],
     /// List of config key-value pairs
@@ -64,6 +83,8 @@ pub struct SettingsScreenState<'a> {
     pub loading: bool,
     /// Form state for new runner
     pub runner_form: &'a RunnerFormState,
+    /// Form state for new action
+    pub action_form: &'a ActionFormState,
     /// Form state for new steering file
     pub steering_form: &'a SteeringFormState,
     /// Form state for new config entry
@@ -79,6 +100,13 @@ pub fn view<'a>(state: SettingsScreenState<'a>, palette: &'a Palette) -> Element
     let runners_section = section_card(
         "Runners",
         runners_content(state.runners, state.runner_form, state.loading, palette),
+        palette,
+    );
+
+    // Actions section
+    let actions_section = section_card(
+        "Actions",
+        actions_content(state.actions, state.action_form, state.loading, palette),
         palette,
     );
 
@@ -111,6 +139,8 @@ pub fn view<'a>(state: SettingsScreenState<'a>, palette: &'a Palette) -> Element
             header,
             Space::with_height(24),
             runners_section,
+            Space::with_height(24),
+            actions_section,
             Space::with_height(24),
             steering_section,
             Space::with_height(24),
@@ -481,6 +511,321 @@ fn runner_editor<'a>(form: &'a RunnerFormState, palette: &'a Palette) -> Element
     // Add cancel button when in edit mode
     let button_row: Element<'a, Message> = if form.editing.is_some() {
         let cancel_btn = small_action_button("Cancel", Message::CancelEditRunner, palette);
+        row![horizontal_space(), cancel_btn, save_btn]
+            .spacing(8)
+            .into()
+    } else {
+        row![horizontal_space(), save_btn].into()
+    };
+
+    column![
+        row![name_input, command_input].spacing(SPACING),
+        row![args_input, concurrency_input, on_event_input].spacing(SPACING),
+        button_row,
+    ]
+    .spacing(SPACING)
+    .into()
+}
+
+/// Renders the actions section content
+fn actions_content<'a>(
+    actions: &'a [(String, ActionConfig)],
+    form: &'a ActionFormState,
+    _loading: bool,
+    palette: &'a Palette,
+) -> Element<'a, Message> {
+    let mut content_items: Vec<Element<'a, Message>> = Vec::new();
+
+    if actions.is_empty() {
+        content_items.push(
+            text("No actions configured")
+                .size(FONT_SIZE_SMALL)
+                .color(palette.text_muted)
+                .into(),
+        );
+    } else {
+        for (name, config) in actions {
+            content_items.push(action_row(name, config, palette));
+        }
+    }
+
+    content_items.push(Space::with_height(16).into());
+    let form_title = if form.editing.is_some() {
+        "Edit Action"
+    } else {
+        "Add Action"
+    };
+    content_items.push(
+        text(form_title)
+            .size(FONT_SIZE_SMALL)
+            .color(palette.text_secondary)
+            .into(),
+    );
+    content_items.push(Space::with_height(8).into());
+    content_items.push(action_editor(form, palette));
+
+    column(content_items).spacing(SPACING).into()
+}
+
+/// Renders a single action row with edit/delete buttons
+fn action_row<'a>(
+    name: &'a str,
+    config: &'a ActionConfig,
+    palette: &'a Palette,
+) -> Element<'a, Message> {
+    let name_text = text(name).size(14).color(palette.text);
+
+    let command_text = text(format!("Command: {}", config.command))
+        .size(FONT_SIZE_SMALL)
+        .color(palette.text_secondary);
+
+    let event_str = config.on.as_deref().unwrap_or("(none)");
+    let concurrency_str = config
+        .concurrency
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "1".to_string());
+    let meta_text = text(format!(
+        "Event: {} • Concurrency: {}",
+        event_str, concurrency_str
+    ))
+    .size(FONT_SIZE_SMALL)
+    .color(palette.text_muted);
+
+    let edit_btn = small_action_button("Edit", Message::EditAction(name.to_string()), palette);
+    let delete_btn =
+        small_action_button("Delete", Message::DeleteAction(name.to_string()), palette);
+
+    let info_col = column![name_text, command_text, meta_text].spacing(4);
+
+    let row_bg = palette.card;
+    let row_border = palette.border;
+
+    container(
+        row![info_col, horizontal_space(), edit_btn, delete_btn]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+    )
+    .padding(IcedPadding::from([PADDING, PADDING_LARGE]))
+    .width(Length::Fill)
+    .style(move |_| container::Style {
+        background: Some(Background::Color(row_bg)),
+        border: Border {
+            color: row_border,
+            width: 1.0,
+            radius: Radius::from(appearance::CORNER_RADIUS),
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
+/// Renders the action editor form (supports both create and edit modes)
+fn action_editor<'a>(form: &'a ActionFormState, palette: &'a Palette) -> Element<'a, Message> {
+    let name_input = labeled_field(
+        "Name",
+        text_input("Action name", &form.name)
+            .on_input(|v| Message::ActionFormChanged {
+                field: "name".to_string(),
+                value: v,
+            })
+            .padding(10)
+            .size(13)
+            .style({
+                let accent = palette.accent;
+                let border_hover = palette.border_hover;
+                let border = palette.border;
+                let bg_input = palette.input;
+                let text_muted = palette.text_muted;
+                let text_primary = palette.text;
+                move |_: &Theme, status| {
+                    let border_color = match status {
+                        text_input::Status::Focused => accent,
+                        text_input::Status::Hovered => border_hover,
+                        _ => border,
+                    };
+                    text_input::Style {
+                        background: Background::Color(bg_input),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
+                        },
+                        icon: text_muted,
+                        placeholder: text_muted,
+                        value: text_primary,
+                        selection: accent,
+                    }
+                }
+            }),
+        palette,
+    );
+
+    let command_input = labeled_field(
+        "Command",
+        text_input("Command (e.g., claude)", &form.command)
+            .on_input(|v| Message::ActionFormChanged {
+                field: "command".to_string(),
+                value: v,
+            })
+            .padding(10)
+            .size(13)
+            .style({
+                let accent = palette.accent;
+                let border_hover = palette.border_hover;
+                let border = palette.border;
+                let bg_input = palette.input;
+                let text_muted = palette.text_muted;
+                let text_primary = palette.text;
+                move |_: &Theme, status| {
+                    let border_color = match status {
+                        text_input::Status::Focused => accent,
+                        text_input::Status::Hovered => border_hover,
+                        _ => border,
+                    };
+                    text_input::Style {
+                        background: Background::Color(bg_input),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
+                        },
+                        icon: text_muted,
+                        placeholder: text_muted,
+                        value: text_primary,
+                        selection: accent,
+                    }
+                }
+            }),
+        palette,
+    );
+
+    let args_input = labeled_field(
+        "Args",
+        text_input("Args (e.g., --print --message \"${PROMPT}\")", &form.args)
+            .on_input(|v| Message::ActionFormChanged {
+                field: "args".to_string(),
+                value: v,
+            })
+            .padding(10)
+            .size(13)
+            .style({
+                let accent = palette.accent;
+                let border_hover = palette.border_hover;
+                let border = palette.border;
+                let bg_input = palette.input;
+                let text_muted = palette.text_muted;
+                let text_primary = palette.text;
+                move |_: &Theme, status| {
+                    let border_color = match status {
+                        text_input::Status::Focused => accent,
+                        text_input::Status::Hovered => border_hover,
+                        _ => border,
+                    };
+                    text_input::Style {
+                        background: Background::Color(bg_input),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
+                        },
+                        icon: text_muted,
+                        placeholder: text_muted,
+                        value: text_primary,
+                        selection: accent,
+                    }
+                }
+            }),
+        palette,
+    );
+
+    let concurrency_input = labeled_field(
+        "Concurrency",
+        text_input("Concurrency (default: 1)", &form.concurrency)
+            .on_input(|v| Message::ActionFormChanged {
+                field: "concurrency".to_string(),
+                value: v,
+            })
+            .padding(10)
+            .size(13)
+            .style({
+                let accent = palette.accent;
+                let border_hover = palette.border_hover;
+                let border = palette.border;
+                let bg_input = palette.input;
+                let text_muted = palette.text_muted;
+                let text_primary = palette.text;
+                move |_: &Theme, status| {
+                    let border_color = match status {
+                        text_input::Status::Focused => accent,
+                        text_input::Status::Hovered => border_hover,
+                        _ => border,
+                    };
+                    text_input::Style {
+                        background: Background::Color(bg_input),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
+                        },
+                        icon: text_muted,
+                        placeholder: text_muted,
+                        value: text_primary,
+                        selection: accent,
+                    }
+                }
+            }),
+        palette,
+    );
+
+    let on_event_input = labeled_field(
+        "On Event",
+        text_input("Event (e.g., task.next)", &form.on_event)
+            .on_input(|v| Message::ActionFormChanged {
+                field: "on".to_string(),
+                value: v,
+            })
+            .padding(10)
+            .size(13)
+            .style({
+                let accent = palette.accent;
+                let border_hover = palette.border_hover;
+                let border = palette.border;
+                let bg_input = palette.input;
+                let text_muted = palette.text_muted;
+                let text_primary = palette.text;
+                move |_: &Theme, status| {
+                    let border_color = match status {
+                        text_input::Status::Focused => accent,
+                        text_input::Status::Hovered => border_hover,
+                        _ => border,
+                    };
+                    text_input::Style {
+                        background: Background::Color(bg_input),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
+                        },
+                        icon: text_muted,
+                        placeholder: text_muted,
+                        value: text_primary,
+                        selection: accent,
+                    }
+                }
+            }),
+        palette,
+    );
+
+    let can_save = !form.name.is_empty() && !form.command.is_empty();
+    let button_label = if form.editing.is_some() {
+        "Update"
+    } else {
+        "Add"
+    };
+    let save_btn = primary_button(button_label, Message::SaveAction, can_save, false, palette);
+
+    let button_row: Element<'a, Message> = if form.editing.is_some() {
+        let cancel_btn = small_action_button("Cancel", Message::CancelEditAction, palette);
         row![horizontal_space(), cancel_btn, save_btn]
             .spacing(8)
             .into()

@@ -15,7 +15,7 @@ use crate::cli::workers;
 use crate::cli::workers::WorkerOutput;
 use crate::daemon::{LogTarget, StartWorkerRequest, ensure_daemon};
 use crate::error::{GranaryError, Result};
-use crate::models::Worker;
+use crate::models::{Worker, merge_action_with_runner};
 use crate::output::Output;
 use crate::services::{Workspace, global_config_service};
 
@@ -175,6 +175,7 @@ pub async fn worker(
     match command {
         Some(WorkerCommand::Start {
             runner,
+            action,
             command,
             args,
             on,
@@ -185,6 +186,7 @@ pub async fn worker(
         }) => {
             start_worker(StartWorkerArgs {
                 runner_name: runner,
+                action_name: action,
                 inline_command: command,
                 args,
                 event_type: on,
@@ -227,6 +229,7 @@ pub async fn worker(
 
 struct StartWorkerArgs {
     runner_name: Option<String>,
+    action_name: Option<String>,
     inline_command: Option<String>,
     args: Vec<String>,
     event_type: Option<String>,
@@ -241,6 +244,7 @@ struct StartWorkerArgs {
 async fn start_worker(args: StartWorkerArgs) -> Result<()> {
     let StartWorkerArgs {
         runner_name,
+        action_name,
         inline_command,
         args: cli_args,
         event_type,
@@ -257,13 +261,22 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
         None => None,
     };
 
-    // Validate we have either a runner or an inline command
+    // Validate we have either a runner, action, or an inline command
     let (command, final_args, final_concurrency, final_event_type) =
-        match (&runner_name, &inline_command) {
-            (Some(name), None) => {
+        match (&runner_name, &action_name, &inline_command) {
+            (Some(name), None, None) => {
                 // Load runner from config
                 let runner = global_config_service::get_runner(name)?
                     .ok_or_else(|| GranaryError::RunnerNotFound(name.clone()))?;
+
+                // If runner references an action, merge action defaults with runner overrides
+                let runner = if let Some(ref action_name) = runner.action {
+                    let action = global_config_service::get_action(action_name)?
+                        .ok_or_else(|| GranaryError::ActionNotFound(action_name.clone()))?;
+                    merge_action_with_runner(&action, &runner)
+                } else {
+                    runner
+                };
 
                 let concurrency = if concurrency == 1 {
                     runner.concurrency.unwrap_or(1)
@@ -290,7 +303,35 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
                     resolved_event_type,
                 )
             }
-            (None, Some(cmd)) => {
+            (None, Some(name), None) => {
+                // Load action directly by name
+                let action = global_config_service::get_action(name)?
+                    .ok_or_else(|| GranaryError::ActionNotFound(name.clone()))?;
+
+                let concurrency = if concurrency == 1 {
+                    action.concurrency.unwrap_or(1)
+                } else {
+                    concurrency
+                };
+
+                let resolved_event_type = event_type.or(action.on.clone()).ok_or_else(|| {
+                    GranaryError::InvalidArgument(format!(
+                        "Must specify --on event type (action '{}' has no default 'on' configured)",
+                        name
+                    ))
+                })?;
+
+                let mut merged_args = action.expand_env_in_args();
+                merged_args.extend(cli_args);
+
+                (
+                    action.command,
+                    merged_args,
+                    concurrency,
+                    resolved_event_type,
+                )
+            }
+            (None, None, Some(cmd)) => {
                 // Inline command requires --on
                 let resolved_event_type = event_type.ok_or_else(|| {
                     GranaryError::InvalidArgument(
@@ -299,14 +340,14 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
                 })?;
                 (cmd.clone(), cli_args, concurrency, resolved_event_type)
             }
-            (Some(_), Some(_)) => {
+            (None, None, None) => {
                 return Err(GranaryError::InvalidArgument(
-                    "Cannot specify both --runner and --command".to_string(),
+                    "Must specify either --runner, --action, or --command".to_string(),
                 ));
             }
-            (None, None) => {
+            _ => {
                 return Err(GranaryError::InvalidArgument(
-                    "Must specify either --runner or --command".to_string(),
+                    "Cannot specify more than one of --runner, --action, and --command".to_string(),
                 ));
             }
         };
@@ -320,7 +361,7 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
 
     // Start worker via daemon
     let req = StartWorkerRequest {
-        runner_name,
+        runner_name: runner_name.or(action_name),
         command,
         args: final_args,
         event_type: final_event_type,

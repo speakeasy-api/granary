@@ -23,15 +23,15 @@ pub mod workers;
 use crate::appearance::Palette;
 use crate::message::{Message, SteeringFile, TaskFilter};
 use granary_types::{
-    Initiative, InitiativeSummary, Project, Run, RunnerConfig, Task as GranaryTask, TaskDependency,
-    Worker,
+    ActionConfig, Initiative, InitiativeSummary, Project, Run, RunnerConfig, Task as GranaryTask,
+    TaskDependency, Worker,
 };
 use iced::widget::{Space, column, container, text, text_editor};
 use iced::{Alignment, Element, Length};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use self::settings::{ConfigFormState, RunnerFormState, SteeringFormState};
+use self::settings::{ActionFormState, ConfigFormState, RunnerFormState, SteeringFormState};
 
 /// Application screens for navigation.
 #[derive(Debug, Clone, PartialEq)]
@@ -101,9 +101,10 @@ pub struct ScreenContext<'a> {
     // Task filter
     pub task_filter: &'a TaskFilter,
     pub task_view_mode: tasks::TaskViewMode,
-    // Workers and runners
+    // Workers, runners, and actions
     pub workers: &'a [Worker],
     pub runners: &'a [(String, RunnerConfig)],
+    pub actions: &'a [(String, ActionConfig)],
     // Runs
     pub runs: &'a [Run],
     pub selected_run: Option<&'a Run>,
@@ -116,6 +117,7 @@ pub struct ScreenContext<'a> {
     pub steering_files: &'a [SteeringFile],
     pub config_entries: &'a [(String, String)],
     pub runner_form: &'a RunnerFormState,
+    pub action_form: &'a ActionFormState,
     pub steering_form: &'a SteeringFormState,
     pub config_form: &'a ConfigFormState,
     // Start worker form
@@ -314,6 +316,7 @@ pub fn dispatch_view<'a>(
         Screen::Workers => {
             let state = workers::WorkersScreenState {
                 runners: ctx.runners,
+                actions: ctx.actions,
                 workers: ctx.workers,
                 workspace: ctx.workspace,
                 loading: ctx.loading,
@@ -365,10 +368,12 @@ pub fn dispatch_view<'a>(
         Screen::Settings => {
             let state = settings::SettingsScreenState {
                 runners: ctx.runners,
+                actions: ctx.actions,
                 steering_files: ctx.steering_files,
                 config_entries: ctx.config_entries,
                 loading: ctx.loading,
                 runner_form: ctx.runner_form,
+                action_form: ctx.action_form,
                 steering_form: ctx.steering_form,
                 config_form: ctx.config_form,
             };

@@ -212,7 +212,15 @@ impl WorkerRuntime {
 
     /// Poll for new events and handle them.
     async fn poll_and_handle_events(&mut self) -> Result<()> {
-        let events = self.poller.poll().await?;
+        // Only claim as many events as we have available concurrency slots.
+        // Events are claimed atomically during poll(), so claiming more than
+        // we can process would permanently consume them without handling them.
+        let available = self.worker.concurrency as usize - self.active_runs.len();
+        if available == 0 {
+            return Ok(());
+        }
+
+        let events = self.poller.poll(Some(available)).await?;
 
         for event in events {
             if let Err(e) = self.handle_event(event).await {

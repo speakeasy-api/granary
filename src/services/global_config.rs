@@ -5,7 +5,7 @@
 
 use crate::db::connection::{create_pool, run_migrations};
 use crate::error::{GranaryError, Result};
-use crate::models::{GlobalConfig, RunnerConfig};
+use crate::models::{ActionConfig, GlobalConfig, RunnerConfig};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tokio::sync::OnceCell;
@@ -165,6 +165,130 @@ pub fn save(config: &GlobalConfig) -> Result<()> {
 
     std::fs::write(&path, content)?;
     Ok(())
+}
+
+/// Get the actions directory (~/.granary/actions)
+pub fn actions_dir() -> Result<PathBuf> {
+    Ok(config_dir()?.join("actions"))
+}
+
+/// Load an action from a standalone TOML file in the given directory.
+///
+/// Returns `Ok(None)` if the file does not exist.
+fn load_action_from_dir(dir: &std::path::Path, name: &str) -> Result<Option<ActionConfig>> {
+    let path = dir.join(format!("{}.toml", name));
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let action: ActionConfig = toml::from_str(&content).map_err(|e| {
+        GranaryError::GlobalConfig(format!("Failed to parse action file '{}': {}", name, e))
+    })?;
+    Ok(Some(action))
+}
+
+/// Load an action from its standalone file (~/.granary/actions/<name>.toml)
+///
+/// Returns `Ok(None)` if the file does not exist.
+pub fn load_action(name: &str) -> Result<Option<ActionConfig>> {
+    load_action_from_dir(&actions_dir()?, name)
+}
+
+/// List .toml file stem names from a directory.
+fn list_action_files_in_dir(dir: &std::path::Path) -> Result<Vec<String>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                names.push(stem.to_string());
+            }
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// List action file names from ~/.granary/actions/ (returns stem names without .toml)
+pub fn list_action_files() -> Result<Vec<String>> {
+    list_action_files_in_dir(&actions_dir()?)
+}
+
+/// Get an action by name, checking inline config actions first, then file-based.
+fn get_action_with(
+    inline: &std::collections::HashMap<String, ActionConfig>,
+    dir: &std::path::Path,
+    name: &str,
+) -> Result<Option<ActionConfig>> {
+    if let Some(action) = inline.get(name) {
+        return Ok(Some(action.clone()));
+    }
+    load_action_from_dir(dir, name)
+}
+
+/// Get an action by name, checking inline config first, then file-based actions.
+///
+/// Inline actions (from config.toml `[actions]`) take precedence over
+/// file-based actions (from `~/.granary/actions/<name>.toml`).
+pub fn get_action(name: &str) -> Result<Option<ActionConfig>> {
+    let config = load()?;
+    get_action_with(&config.actions, &actions_dir()?, name)
+}
+
+/// Merge inline actions and file-based actions, with inline taking precedence.
+fn list_all_actions_with(
+    inline: &std::collections::HashMap<String, ActionConfig>,
+    dir: &std::path::Path,
+) -> Result<Vec<(String, ActionConfig)>> {
+    let file_names = list_action_files_in_dir(dir)?;
+
+    let mut result: Vec<(String, ActionConfig)> = Vec::new();
+
+    // File-based actions (only if not overridden by inline)
+    for name in file_names {
+        if !inline.contains_key(&name) {
+            if let Some(action) = load_action_from_dir(dir, &name)? {
+                result.push((name, action));
+            }
+        }
+    }
+
+    // Inline actions take precedence
+    for (name, action) in inline {
+        result.push((name.clone(), action.clone()));
+    }
+
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(result)
+}
+
+/// List all actions from both inline config and action files.
+///
+/// Returns a merged list where inline actions take precedence on name conflicts.
+pub fn list_all_actions() -> Result<Vec<(String, ActionConfig)>> {
+    let config = load()?;
+    list_all_actions_with(&config.actions, &actions_dir()?)
+}
+
+/// Add or update an inline action configuration
+pub fn set_action(name: &str, action: ActionConfig) -> Result<()> {
+    let mut config = load()?;
+    config.actions.insert(name.to_string(), action);
+    save(&config)
+}
+
+/// Remove an inline action configuration
+pub fn remove_action(name: &str) -> Result<bool> {
+    let mut config = load()?;
+    let removed = config.actions.remove(name).is_some();
+    if removed {
+        save(&config)?;
+    }
+    Ok(removed)
 }
 
 /// Get a specific runner by name
@@ -352,5 +476,155 @@ mod tests {
         assert!(result.is_ok());
         // The result should be a boolean (true if ~/.granary doesn't exist)
         let _is_first = result.unwrap();
+    }
+
+    #[test]
+    fn test_actions_dir() {
+        let dir = actions_dir();
+        assert!(dir.is_ok());
+        let dir = dir.unwrap();
+        assert!(dir.ends_with("actions"));
+        assert!(dir.parent().unwrap().ends_with(".granary"));
+    }
+
+    #[test]
+    fn test_load_action_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = load_action_from_dir(tmp.path(), "nonexistent").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_load_action_valid_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let content = r#"
+command = "claude"
+args = ["code", "--task"]
+concurrency = 2
+on = "task.unblocked"
+
+[env]
+CLAUDE_MODEL = "opus"
+"#;
+        std::fs::write(tmp.path().join("my-action.toml"), content).unwrap();
+
+        let action = load_action_from_dir(tmp.path(), "my-action")
+            .unwrap()
+            .expect("action should exist");
+        assert_eq!(action.command, "claude");
+        assert_eq!(action.args, vec!["code", "--task"]);
+        assert_eq!(action.concurrency, Some(2));
+        assert_eq!(action.on.as_deref(), Some("task.unblocked"));
+        assert_eq!(action.env.get("CLAUDE_MODEL").unwrap(), "opus");
+    }
+
+    #[test]
+    fn test_list_action_files_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let names = list_action_files_in_dir(tmp.path()).unwrap();
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_list_action_files_nonexistent_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("does-not-exist");
+        let names = list_action_files_in_dir(&missing).unwrap();
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_list_action_files_with_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("beta.toml"), "command = \"b\"\n").unwrap();
+        std::fs::write(tmp.path().join("alpha.toml"), "command = \"a\"\n").unwrap();
+        // Non-toml file should be ignored
+        std::fs::write(tmp.path().join("readme.md"), "# hi").unwrap();
+
+        let names = list_action_files_in_dir(tmp.path()).unwrap();
+        assert_eq!(names, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn test_get_action_inline_takes_precedence() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // File-based action
+        std::fs::write(
+            tmp.path().join("deploy.toml"),
+            "command = \"file-deploy\"\n",
+        )
+        .unwrap();
+
+        // Inline action with the same name
+        let mut inline = std::collections::HashMap::new();
+        inline.insert("deploy".to_string(), ActionConfig::new("inline-deploy"));
+
+        let action = get_action_with(&inline, tmp.path(), "deploy")
+            .unwrap()
+            .expect("action should exist");
+        assert_eq!(action.command, "inline-deploy");
+    }
+
+    #[test]
+    fn test_get_action_falls_back_to_file() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        std::fs::write(
+            tmp.path().join("deploy.toml"),
+            "command = \"file-deploy\"\n",
+        )
+        .unwrap();
+
+        let inline = std::collections::HashMap::new();
+
+        let action = get_action_with(&inline, tmp.path(), "deploy")
+            .unwrap()
+            .expect("action should exist");
+        assert_eq!(action.command, "file-deploy");
+    }
+
+    #[test]
+    fn test_get_action_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inline = std::collections::HashMap::new();
+        let action = get_action_with(&inline, tmp.path(), "missing").unwrap();
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn test_list_all_actions_merge() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // File-based actions
+        std::fs::write(tmp.path().join("alpha.toml"), "command = \"file-alpha\"\n").unwrap();
+        std::fs::write(
+            tmp.path().join("shared.toml"),
+            "command = \"file-shared\"\n",
+        )
+        .unwrap();
+
+        // Inline actions (shared should override file)
+        let mut inline = std::collections::HashMap::new();
+        inline.insert("shared".to_string(), ActionConfig::new("inline-shared"));
+        inline.insert("beta".to_string(), ActionConfig::new("inline-beta"));
+
+        let all = list_all_actions_with(&inline, tmp.path()).unwrap();
+        let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["alpha", "beta", "shared"]);
+
+        // Verify sources
+        assert_eq!(
+            all.iter().find(|(n, _)| n == "alpha").unwrap().1.command,
+            "file-alpha"
+        );
+        assert_eq!(
+            all.iter().find(|(n, _)| n == "beta").unwrap().1.command,
+            "inline-beta"
+        );
+        assert_eq!(
+            all.iter().find(|(n, _)| n == "shared").unwrap().1.command,
+            "inline-shared"
+        );
     }
 }

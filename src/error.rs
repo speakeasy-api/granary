@@ -73,6 +73,9 @@ pub enum GranaryError {
     #[error("Runner not found: {0}")]
     RunnerNotFound(String),
 
+    #[error("Action not found: {0}")]
+    ActionNotFound(String),
+
     #[error("No active session. Start one with 'granary session start <name>'.")]
     NoActiveSession,
 
@@ -170,6 +173,7 @@ impl GranaryError {
             | GranaryError::WorkerNotFound(_)
             | GranaryError::RunNotFound(_)
             | GranaryError::RunnerNotFound(_)
+            | GranaryError::ActionNotFound(_)
             | GranaryError::NoActiveSession => exit_codes::NOT_FOUND,
 
             // Conflict errors (concurrency, claims, registry)
