@@ -203,10 +203,10 @@ fn list_action_files_in_dir(dir: &std::path::Path) -> Result<Vec<String>> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                names.push(stem.to_string());
-            }
+        if path.extension().and_then(|e| e.to_str()) == Some("toml")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            names.push(stem.to_string());
         }
     }
     names.sort();
@@ -250,10 +250,10 @@ fn list_all_actions_with(
 
     // File-based actions (only if not overridden by inline)
     for name in file_names {
-        if !inline.contains_key(&name) {
-            if let Some(action) = load_action_from_dir(dir, &name)? {
-                result.push((name, action));
-            }
+        if !inline.contains_key(&name)
+            && let Some(action) = load_action_from_dir(dir, &name)?
+        {
+            result.push((name, action));
         }
     }
 

@@ -142,21 +142,21 @@ impl Workspace {
         }
 
         // Step 2: Registry lookup — check if cwd or ancestor matches a registered root
-        if let Some(registry) = registry {
-            if let Some(workspace_name) = registry.lookup_root(cwd) {
-                let db_path = config_dir
-                    .join("workspaces")
-                    .join(workspace_name)
-                    .join(DB_FILE);
-                let ws_dir = db_path.parent().unwrap().to_path_buf();
-                return Ok(Self {
-                    name: Some(workspace_name.to_string()),
-                    root: cwd.to_path_buf(),
-                    granary_dir: ws_dir,
-                    db_path,
-                    mode: WorkspaceMode::Named(workspace_name.to_string()),
-                });
-            }
+        if let Some(registry) = registry
+            && let Some(workspace_name) = registry.lookup_root(cwd)
+        {
+            let db_path = config_dir
+                .join("workspaces")
+                .join(workspace_name)
+                .join(DB_FILE);
+            let ws_dir = db_path.parent().unwrap().to_path_buf();
+            return Ok(Self {
+                name: Some(workspace_name.to_string()),
+                root: cwd.to_path_buf(),
+                granary_dir: ws_dir,
+                db_path,
+                mode: WorkspaceMode::Named(workspace_name.to_string()),
+            });
         }
 
         // Step 3: Walk up from parent looking for .granary/, stop BEFORE $HOME
