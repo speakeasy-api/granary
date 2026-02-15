@@ -147,8 +147,8 @@ pub async fn plan(
         )
         .await?;
 
-        // Search for prior art - similar/related projects
-        let prior_art = find_prior_art(&pool, name).await?;
+        // Search for prior art - similar/related projects (exclude the just-created project)
+        let prior_art = find_prior_art(&pool, name, &project.id).await?;
 
         // Output the guidance
         let output = PlanOutput { project, prior_art };
@@ -158,13 +158,21 @@ pub async fn plan(
     Ok(())
 }
 
-/// Find prior art - projects with similar names or keywords
-async fn find_prior_art(pool: &sqlx::SqlitePool, query: &str) -> Result<Vec<ProjectWithProgress>> {
+/// Find prior art - projects with similar names or keywords, excluding the current project
+async fn find_prior_art(
+    pool: &sqlx::SqlitePool,
+    query: &str,
+    exclude_id: &str,
+) -> Result<Vec<ProjectWithProgress>> {
     // Search for similar projects
     let search_results = db::search::search_projects(pool, query).await?;
 
     let mut prior_art = Vec::new();
-    for project in search_results.into_iter().take(5) {
+    for project in search_results
+        .into_iter()
+        .filter(|p| p.id != exclude_id)
+        .take(5)
+    {
         // Get task counts for each project
         let tasks = services::list_tasks_by_project(pool, &project.id).await?;
         let done_count = tasks.iter().filter(|t| t.status == "done").count();
@@ -335,4 +343,92 @@ fn format_existing_project_guidance(project: &Project, tasks: &[Task]) -> String
     output.push_str(&format!("  granary project {} ready", project.id));
 
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::connection::{create_pool, run_migrations};
+    use granary_types::CreateProject;
+    use tempfile::tempdir;
+
+    async fn setup_test_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let pool = create_pool(&db_path).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        (pool, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn test_find_prior_art_excludes_current_project() {
+        let (pool, _temp) = setup_test_db().await;
+
+        // Create three projects with similar names
+        let project_a = services::create_project(
+            &pool,
+            CreateProject {
+                name: "auth feature".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let project_b = services::create_project(
+            &pool,
+            CreateProject {
+                name: "auth refactor".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let project_c = services::create_project(
+            &pool,
+            CreateProject {
+                name: "auth migration".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // Search for "auth" excluding project_b — should return a and c only
+        let results = find_prior_art(&pool, "auth", &project_b.id).await.unwrap();
+
+        let result_ids: Vec<&str> = results.iter().map(|r| r.project.id.as_str()).collect();
+        assert!(
+            !result_ids.contains(&project_b.id.as_str()),
+            "prior art should not contain the excluded project"
+        );
+        assert!(result_ids.contains(&project_a.id.as_str()));
+        assert!(result_ids.contains(&project_c.id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn test_find_prior_art_returns_empty_when_only_match_is_excluded() {
+        let (pool, _temp) = setup_test_db().await;
+
+        let project = services::create_project(
+            &pool,
+            CreateProject {
+                name: "unique-xyz-name".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // The only match for this query is the excluded project itself
+        let results = find_prior_art(&pool, "unique-xyz-name", &project.id)
+            .await
+            .unwrap();
+
+        assert!(
+            results.is_empty(),
+            "prior art should be empty when the only match is excluded"
+        );
+    }
 }
