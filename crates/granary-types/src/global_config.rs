@@ -47,8 +47,182 @@ pub struct GlobalConfig {
     pub actions: HashMap<String, ActionConfig>,
 }
 
-/// Type alias for action configuration (currently identical to RunnerConfig)
-pub type ActionConfig = RunnerConfig;
+/// Error handling strategy for pipeline steps.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum OnError {
+    /// Stop pipeline, mark run as failed (default)
+    #[default]
+    Stop,
+    /// Record failure, continue to next step
+    Continue,
+}
+
+/// Configuration for a single step within a pipeline action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepConfig {
+    /// Step identifier for output references. Defaults to action name or step_N.
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// Reference to an existing action by name
+    #[serde(default)]
+    pub action: Option<String>,
+
+    /// Inline command (mutually exclusive with `action`)
+    #[serde(default)]
+    pub command: Option<String>,
+
+    /// Arguments (overrides action's args if both present)
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+
+    /// Additional env vars (merged with action's env, step wins)
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+
+    /// Working directory override (supports pipeline templates)
+    #[serde(default)]
+    pub cwd: Option<String>,
+
+    /// Error handling for this step (default: stop)
+    #[serde(default)]
+    pub on_error: Option<OnError>,
+}
+
+impl StepConfig {
+    /// Resolve the effective name for this step.
+    /// Priority: explicit name > action name > step_N
+    pub fn resolved_name(&self, index: usize) -> String {
+        if let Some(name) = &self.name {
+            name.clone()
+        } else if let Some(action) = &self.action {
+            action.clone()
+        } else {
+            format!("step_{}", index + 1)
+        }
+    }
+}
+
+/// Configuration for an action that can be referenced by runners.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionConfig {
+    /// Human-readable description of what this action does
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// Command to execute (e.g., "claude", "python").
+    /// Optional when `steps` is set (pipeline action).
+    #[serde(default)]
+    pub command: Option<String>,
+
+    /// Arguments to pass to the command
+    #[serde(default)]
+    pub args: Vec<String>,
+
+    /// Maximum concurrent executions for this action
+    #[serde(default)]
+    pub concurrency: Option<u32>,
+
+    /// Default event type this action responds to
+    #[serde(default)]
+    pub on: Option<String>,
+
+    /// Environment variables to set when running
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+
+    /// References another action by name (for chaining)
+    #[serde(default)]
+    pub action: Option<String>,
+
+    /// Pipeline steps. When set, this action is a pipeline.
+    /// Mutually exclusive with `command`.
+    #[serde(default)]
+    pub steps: Option<Vec<StepConfig>>,
+}
+
+impl ActionConfig {
+    /// Create a new action configuration with just a command
+    pub fn new(command: impl Into<String>) -> Self {
+        Self {
+            description: None,
+            command: Some(command.into()),
+            args: Vec::new(),
+            concurrency: None,
+            on: None,
+            env: HashMap::new(),
+            action: None,
+            steps: None,
+        }
+    }
+
+    /// Whether this action is a pipeline (has steps).
+    pub fn is_pipeline(&self) -> bool {
+        self.steps.is_some()
+    }
+
+    /// Validate the action configuration.
+    ///
+    /// Ensures:
+    /// - Exactly one of `command` or `steps` is set
+    /// - Each step has exactly one of `action` or `command`
+    /// - Step names are unique within the pipeline
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        match (&self.command, &self.steps) {
+            (Some(_), Some(_)) => {
+                return Err("Action cannot have both 'command' and 'steps' set".to_string());
+            }
+            (None, None) => {
+                return Err("Action must have either 'command' or 'steps' set".to_string());
+            }
+            _ => {}
+        }
+
+        if let Some(steps) = &self.steps {
+            if steps.is_empty() {
+                return Err("Pipeline must have at least one step".to_string());
+            }
+
+            let mut seen_names = std::collections::HashSet::new();
+            for (i, step) in steps.iter().enumerate() {
+                // Validate exactly one of action or command
+                match (&step.action, &step.command) {
+                    (Some(_), Some(_)) => {
+                        return Err(format!(
+                            "Step {} cannot have both 'action' and 'command' set",
+                            i + 1
+                        ));
+                    }
+                    (None, None) => {
+                        return Err(format!(
+                            "Step {} must have either 'action' or 'command' set",
+                            i + 1
+                        ));
+                    }
+                    _ => {}
+                }
+
+                // Validate unique names
+                let name = step.resolved_name(i);
+                if !seen_names.insert(name.clone()) {
+                    return Err(format!(
+                        "Duplicate step name '{}' in pipeline. Use explicit 'name' to disambiguate.",
+                        name
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Expand environment variables in args.
+    /// Supports ${VAR} and $VAR syntax.
+    pub fn expand_env_in_args(&self) -> Vec<String> {
+        self.args.iter().map(|arg| expand_env_vars(arg)).collect()
+    }
+}
 
 /// Configuration for a runner that executes tasks
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +278,7 @@ impl RunnerConfig {
 /// The resulting `action` field is set to `None` (already resolved).
 pub fn merge_action_with_runner(action: &ActionConfig, runner: &RunnerConfig) -> RunnerConfig {
     let command = if runner.command.is_empty() {
-        action.command.clone()
+        action.command.clone().unwrap_or_default()
     } else {
         runner.command.clone()
     };
@@ -191,13 +365,15 @@ mod tests {
 
     #[test]
     fn test_merge_action_with_runner_uses_action_defaults() {
-        let action = RunnerConfig {
-            command: "claude".to_string(),
+        let action = ActionConfig {
+            description: Some("Test action".to_string()),
+            command: Some("claude".to_string()),
             args: vec!["code".to_string(), "--task".to_string()],
             concurrency: Some(3),
             on: Some("task.unblocked".to_string()),
             env: HashMap::from([("MODEL".to_string(), "opus".to_string())]),
             action: None,
+            steps: None,
         };
         // Runner with empty/default fields should inherit from action
         let runner = RunnerConfig::new("");
@@ -213,13 +389,15 @@ mod tests {
 
     #[test]
     fn test_merge_action_with_runner_runner_overrides() {
-        let action = RunnerConfig {
-            command: "claude".to_string(),
+        let action = ActionConfig {
+            description: None,
+            command: Some("claude".to_string()),
             args: vec!["code".to_string()],
             concurrency: Some(3),
             on: Some("task.unblocked".to_string()),
             env: HashMap::from([("MODEL".to_string(), "opus".to_string())]),
             action: None,
+            steps: None,
         };
         let runner = RunnerConfig {
             command: "python".to_string(),
@@ -241,8 +419,9 @@ mod tests {
 
     #[test]
     fn test_merge_action_with_runner_env_merge() {
-        let action = RunnerConfig {
-            command: "cmd".to_string(),
+        let action = ActionConfig {
+            description: None,
+            command: Some("cmd".to_string()),
             args: vec![],
             concurrency: None,
             on: None,
@@ -251,6 +430,7 @@ mod tests {
                 ("B".to_string(), "from-action".to_string()),
             ]),
             action: None,
+            steps: None,
         };
         let runner = RunnerConfig {
             command: "".to_string(),
@@ -268,13 +448,15 @@ mod tests {
 
     #[test]
     fn test_merge_action_with_runner_partial_override() {
-        let action = RunnerConfig {
-            command: "claude".to_string(),
+        let action = ActionConfig {
+            description: Some("Partial override test".to_string()),
+            command: Some("claude".to_string()),
             args: vec!["--model".to_string(), "opus".to_string()],
             concurrency: Some(2),
             on: Some("task.unblocked".to_string()),
             env: HashMap::new(),
             action: None,
+            steps: None,
         };
         // Runner overrides only command and concurrency
         let runner = RunnerConfig {

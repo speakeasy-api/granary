@@ -144,10 +144,11 @@ fn action_card<'a>(
 
     let action_name = text(name).size(14).color(palette.text);
 
+    let cmd = config.command.as_deref().unwrap_or("<pipeline>");
     let command_preview = if config.args.is_empty() {
-        config.command.clone()
+        cmd.to_string()
     } else {
-        format!("{} {}", config.command, config.args.join(" "))
+        format!("{} {}", cmd, config.args.join(" "))
     };
     let command_text = text(command_preview)
         .size(12)

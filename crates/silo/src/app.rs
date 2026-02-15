@@ -1008,7 +1008,7 @@ impl Silo {
                 if let Some((_, config)) = self.actions.iter().find(|(n, _)| n == &name) {
                     self.action_form = ActionFormState {
                         name: name.clone(),
-                        command: config.command.clone(),
+                        command: config.command.clone().unwrap_or_default(),
                         args: config.args.join(", "),
                         concurrency: config
                             .concurrency
@@ -1385,7 +1385,7 @@ impl Silo {
                 if let Some((_, config)) = self.actions.iter().find(|(n, _)| n == &name) {
                     self.start_worker_form = StartWorkerForm {
                         from_runner: None,
-                        command: config.command.clone(),
+                        command: config.command.clone().unwrap_or_default(),
                         args: config.args.join("\n"),
                         event_type: config.on.clone().unwrap_or_default(),
                         concurrency: config

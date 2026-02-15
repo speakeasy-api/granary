@@ -453,6 +453,13 @@ pub enum Commands {
         #[command(subcommand)]
         command: DaemonCommand,
     },
+
+    /// Manage actions - install from registry, create, remove
+    #[command(visible_alias = "actions")]
+    Action {
+        #[command(subcommand)]
+        action: Option<ActionCommand>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1120,6 +1127,10 @@ pub enum ActionsAction {
         #[arg(long)]
         command: String,
 
+        /// Human-readable description of what this action does
+        #[arg(long)]
+        description: Option<String>,
+
         /// Arguments (can be specified multiple times)
         #[arg(long = "arg", short = 'a')]
         args: Vec<String>,
@@ -1145,6 +1156,10 @@ pub enum ActionsAction {
         /// New command to execute
         #[arg(long)]
         command: Option<String>,
+
+        /// Human-readable description of what this action does
+        #[arg(long)]
+        description: Option<String>,
 
         /// Arguments (replaces existing if provided)
         #[arg(long = "arg", short = 'a')]
@@ -1432,6 +1447,82 @@ pub enum DaemonCommand {
         /// Number of lines to show
         #[arg(short = 'n', long, default_value = "50")]
         lines: usize,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ActionCommand {
+    /// Create a new action
+    #[command(visible_aliases = ["new", "create"])]
+    Add {
+        /// Action name
+        name: String,
+
+        /// Command to execute
+        #[arg(long)]
+        command: String,
+
+        /// Human-readable description of what this action does
+        #[arg(long)]
+        description: Option<String>,
+
+        /// Arguments (can be specified multiple times)
+        #[arg(long = "arg", short = 'a')]
+        args: Vec<String>,
+
+        /// Maximum concurrent executions
+        #[arg(long)]
+        concurrency: Option<u32>,
+
+        /// Default event type this action responds to
+        #[arg(long)]
+        on: Option<String>,
+
+        /// Environment variables (KEY=VALUE format, can be specified multiple times)
+        #[arg(long = "env", short = 'e')]
+        env_vars: Vec<String>,
+    },
+
+    /// Install an action from the GitHub registry
+    Install {
+        /// Action name (fetches from GitHub registry)
+        name: String,
+    },
+
+    /// Remove a local action file
+    Remove {
+        /// Action name
+        name: String,
+    },
+
+    /// Update an action from the GitHub registry (re-fetch)
+    Update {
+        /// Action name
+        name: String,
+    },
+
+    /// Show action details
+    Show {
+        /// Action name
+        name: String,
+    },
+
+    /// Run an action directly (one-shot execution)
+    Run {
+        /// Action name
+        name: String,
+
+        /// Set template variables (repeatable, KEY=VALUE format)
+        #[arg(long = "set", short = 's')]
+        vars: Vec<String>,
+
+        /// Override working directory
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+
+        /// Print resolved commands without executing
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 

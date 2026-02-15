@@ -186,6 +186,8 @@ mod tests {
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             stopped_at: None,
             last_event_id: 0,
+            env: "{}".to_string(),
+            pipeline_steps: None,
         }
     }
 

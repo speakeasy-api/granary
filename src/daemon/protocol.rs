@@ -219,6 +219,12 @@ pub struct StartWorkerRequest {
     /// Resolved ISO timestamp to start processing events from
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
+    /// Environment variables to set when spawning runners
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+    /// Pipeline steps (JSON-encoded). When set, worker executes as a pipeline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline_steps: Option<String>,
 }
 
 impl Default for StartWorkerRequest {
@@ -233,6 +239,8 @@ impl Default for StartWorkerRequest {
             instance_path: String::new(),
             attach: false,
             since: None,
+            env: std::collections::HashMap::new(),
+            pipeline_steps: None,
         }
     }
 }

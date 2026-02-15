@@ -139,6 +139,9 @@ pub enum GranaryError {
     #[error("Daemon error: {0}")]
     DaemonError(String),
 
+    #[error("Cancelled: {0}")]
+    Cancelled(String),
+
     #[error("{0}")]
     Other(String),
 }
@@ -203,6 +206,7 @@ impl GranaryError {
             | GranaryError::DaemonProtocol(_)
             | GranaryError::DaemonError(_)
             | GranaryError::WorkspaceRegistry(_)
+            | GranaryError::Cancelled(_)
             | GranaryError::Other(_) => exit_codes::INTERNAL,
         }
     }

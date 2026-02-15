@@ -3,8 +3,8 @@ use std::process::ExitCode;
 
 use granary::cli::args::{Cli, Commands};
 use granary::cli::{
-    batch, checkpoints, config, daemon, entrypoint, events, init, initiate, initiatives, plan,
-    projects, run, search, sessions, show, summary, tasks, update, work, worker, workspace,
+    actions, batch, checkpoints, config, daemon, entrypoint, events, init, initiate, initiatives,
+    plan, projects, run, search, sessions, show, summary, tasks, update, work, worker, workspace,
 };
 use granary::error::{GranaryError, exit_codes};
 
@@ -310,6 +310,10 @@ async fn run(cli: Cli) -> granary::Result<()> {
 
         Commands::Daemon { command } => {
             daemon::daemon(command, format_override).await?;
+        }
+
+        Commands::Action { action } => {
+            actions::action(action, format_override).await?;
         }
     }
 

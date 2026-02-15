@@ -1,0 +1,12 @@
+description = "Run a task using OpenAI Codex CLI"
+command = "codex"
+args = [
+    "exec",
+    "$(granary work start {id})",
+    "--full-auto",
+    "--json",
+]
+concurrency = 3
+on = "task.next"
+
+[env]

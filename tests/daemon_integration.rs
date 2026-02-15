@@ -318,6 +318,8 @@ async fn test_daemon_start_stop_worker() {
         instance_path: workspace_path.to_string_lossy().to_string(),
         attach: false,
         since: None,
+        env: std::collections::HashMap::new(),
+        pipeline_steps: None,
     };
 
     // Note: This will likely fail because the workspace doesn't have a proper granary DB
