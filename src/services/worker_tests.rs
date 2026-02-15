@@ -94,6 +94,8 @@ mod tests {
             updated_at: "2026-01-15T10:30:00Z".to_string(),
             stopped_at: None,
             last_event_id: 100,
+            env: "{}".to_string(),
+            pipeline_steps: None,
         }
     }
 
@@ -234,6 +236,8 @@ mod tests {
             instance_path: "/home/user/project".to_string(),
             detached: true,
             since: None,
+            env: std::collections::HashMap::new(),
+            pipeline_steps: None,
         };
 
         assert_eq!(create.runner_name, Some("claude".to_string()));
@@ -361,6 +365,8 @@ mod tests {
             instance_path: "/projects/myapp".to_string(),
             detached: false,
             since: None,
+            env: std::collections::HashMap::new(),
+            pipeline_steps: None,
         };
 
         assert!(create.runner_name.is_some());
@@ -379,6 +385,8 @@ mod tests {
             instance_path: "/projects/myapp".to_string(),
             detached: false,
             since: None,
+            env: std::collections::HashMap::new(),
+            pipeline_steps: None,
         };
 
         assert!(create.runner_name.is_none());
@@ -401,6 +409,8 @@ mod tests {
             instance_path: "/projects/backend".to_string(),
             detached: true,
             since: None,
+            env: std::collections::HashMap::new(),
+            pipeline_steps: None,
         };
 
         assert_eq!(create.filters.len(), 3);

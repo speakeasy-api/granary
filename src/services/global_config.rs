@@ -194,21 +194,33 @@ pub fn load_action(name: &str) -> Result<Option<ActionConfig>> {
     load_action_from_dir(&actions_dir()?, name)
 }
 
-/// List .toml file stem names from a directory.
+/// List .toml file stem names from a directory, recursively walking subdirectories.
+/// Returns namespaced names using `/` as separator (e.g., `git/worktree-create`).
 fn list_action_files_in_dir(dir: &std::path::Path) -> Result<Vec<String>> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
     let mut names = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("toml")
-            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-        {
-            names.push(stem.to_string());
+    fn walk(
+        base: &std::path::Path,
+        current: &std::path::Path,
+        names: &mut Vec<String>,
+    ) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                walk(base, &path, names)?;
+            } else if path.extension().and_then(|e| e.to_str()) == Some("toml")
+                && let Ok(rel) = path.strip_prefix(base)
+            {
+                let name = rel.with_extension("").to_string_lossy().to_string();
+                names.push(name.replace('\\', "/"));
+            }
         }
+        Ok(())
     }
+    walk(dir, dir, &mut names).map_err(GranaryError::Io)?;
     names.sort();
     Ok(names)
 }
@@ -511,7 +523,7 @@ CLAUDE_MODEL = "opus"
         let action = load_action_from_dir(tmp.path(), "my-action")
             .unwrap()
             .expect("action should exist");
-        assert_eq!(action.command, "claude");
+        assert_eq!(action.command.as_deref(), Some("claude"));
         assert_eq!(action.args, vec!["code", "--task"]);
         assert_eq!(action.concurrency, Some(2));
         assert_eq!(action.on.as_deref(), Some("task.unblocked"));
@@ -563,7 +575,7 @@ CLAUDE_MODEL = "opus"
         let action = get_action_with(&inline, tmp.path(), "deploy")
             .unwrap()
             .expect("action should exist");
-        assert_eq!(action.command, "inline-deploy");
+        assert_eq!(action.command.as_deref(), Some("inline-deploy"));
     }
 
     #[test]
@@ -581,7 +593,7 @@ CLAUDE_MODEL = "opus"
         let action = get_action_with(&inline, tmp.path(), "deploy")
             .unwrap()
             .expect("action should exist");
-        assert_eq!(action.command, "file-deploy");
+        assert_eq!(action.command.as_deref(), Some("file-deploy"));
     }
 
     #[test]
@@ -615,16 +627,138 @@ CLAUDE_MODEL = "opus"
 
         // Verify sources
         assert_eq!(
-            all.iter().find(|(n, _)| n == "alpha").unwrap().1.command,
-            "file-alpha"
+            all.iter()
+                .find(|(n, _)| n == "alpha")
+                .unwrap()
+                .1
+                .command
+                .as_deref(),
+            Some("file-alpha")
         );
         assert_eq!(
-            all.iter().find(|(n, _)| n == "beta").unwrap().1.command,
-            "inline-beta"
+            all.iter()
+                .find(|(n, _)| n == "beta")
+                .unwrap()
+                .1
+                .command
+                .as_deref(),
+            Some("inline-beta")
         );
         assert_eq!(
-            all.iter().find(|(n, _)| n == "shared").unwrap().1.command,
-            "inline-shared"
+            all.iter()
+                .find(|(n, _)| n == "shared")
+                .unwrap()
+                .1
+                .command
+                .as_deref(),
+            Some("inline-shared")
+        );
+    }
+
+    #[test]
+    fn test_list_action_files_recursive() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Flat actions
+        std::fs::write(tmp.path().join("slack-message.toml"), "command = \"s\"\n").unwrap();
+        // Namespaced actions
+        std::fs::create_dir_all(tmp.path().join("git")).unwrap();
+        std::fs::write(
+            tmp.path().join("git/worktree-create.toml"),
+            "command = \"g\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(tmp.path().join("agents")).unwrap();
+        std::fs::write(
+            tmp.path().join("agents/claude-work.toml"),
+            "command = \"c\"\n",
+        )
+        .unwrap();
+        // Non-toml in subdirectory should be ignored
+        std::fs::write(tmp.path().join("git/README.md"), "# hi").unwrap();
+
+        let names = list_action_files_in_dir(tmp.path()).unwrap();
+        assert_eq!(
+            names,
+            vec!["agents/claude-work", "git/worktree-create", "slack-message"]
+        );
+    }
+
+    #[test]
+    fn test_load_action_namespaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("git")).unwrap();
+        let content = "command = \"git\"\nargs = [\"worktree\", \"add\"]\n";
+        std::fs::write(tmp.path().join("git/worktree-create.toml"), content).unwrap();
+
+        let action = load_action_from_dir(tmp.path(), "git/worktree-create")
+            .unwrap()
+            .expect("namespaced action should exist");
+        assert_eq!(action.command.as_deref(), Some("git"));
+        assert_eq!(action.args, vec!["worktree", "add"]);
+    }
+
+    #[test]
+    fn test_list_action_files_deeply_nested() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("a/b")).unwrap();
+        std::fs::write(tmp.path().join("a/b/deep.toml"), "command = \"d\"\n").unwrap();
+        std::fs::write(tmp.path().join("a/shallow.toml"), "command = \"s\"\n").unwrap();
+
+        let names = list_action_files_in_dir(tmp.path()).unwrap();
+        assert_eq!(names, vec!["a/b/deep", "a/shallow"]);
+    }
+
+    #[test]
+    fn test_inline_config_namespaced_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut inline = std::collections::HashMap::new();
+        inline.insert(
+            "git/worktree-create".to_string(),
+            ActionConfig::new("git-wt"),
+        );
+
+        let action = get_action_with(&inline, tmp.path(), "git/worktree-create")
+            .unwrap()
+            .expect("inline namespaced action should exist");
+        assert_eq!(action.command.as_deref(), Some("git-wt"));
+    }
+
+    #[test]
+    fn test_list_all_actions_with_namespaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        // File-based namespaced action
+        std::fs::create_dir_all(tmp.path().join("git")).unwrap();
+        std::fs::write(
+            tmp.path().join("git/worktree-create.toml"),
+            "command = \"file-git\"\n",
+        )
+        .unwrap();
+        // Flat file action
+        std::fs::write(
+            tmp.path().join("notify.toml"),
+            "command = \"file-notify\"\n",
+        )
+        .unwrap();
+        // Inline namespaced action (should override file)
+        let mut inline = std::collections::HashMap::new();
+        inline.insert(
+            "git/worktree-create".to_string(),
+            ActionConfig::new("inline-git"),
+        );
+
+        let all = list_all_actions_with(&inline, tmp.path()).unwrap();
+        let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["git/worktree-create", "notify"]);
+
+        // Inline should take precedence
+        assert_eq!(
+            all.iter()
+                .find(|(n, _)| n == "git/worktree-create")
+                .unwrap()
+                .1
+                .command
+                .as_deref(),
+            Some("inline-git")
         );
     }
 }

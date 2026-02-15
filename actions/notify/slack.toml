@@ -1,0 +1,8 @@
+description = "Send a Slack summary on task completion"
+command = "sh"
+args = ["-c", "granary summary | jq -Rs '{text: .}' | curl -s -X POST -H 'Content-Type: application/json' -d @- ${SLACK_WEBHOOK_URL}"]
+concurrency = 1
+on = "task.completed"
+
+[env]
+SLACK_WEBHOOK_URL = "${SLACK_WEBHOOK_URL}"

@@ -1135,6 +1135,14 @@ pub mod sessions {
 pub mod events {
     use super::*;
 
+    pub async fn get_by_id(pool: &SqlitePool, event_id: i64) -> Result<Option<Event>> {
+        let event = sqlx::query_as::<_, Event>("SELECT * FROM events WHERE id = ?")
+            .bind(event_id)
+            .fetch_optional(pool)
+            .await?;
+        Ok(event)
+    }
+
     pub async fn list_by_entity(
         pool: &SqlitePool,
         entity_type: &str,
@@ -1986,12 +1994,13 @@ pub mod workers {
         let now = chrono::Utc::now().to_rfc3339();
         let args_json = serde_json::to_string(&input.args)?;
         let filters_json = serde_json::to_string(&input.filters)?;
+        let env_json = serde_json::to_string(&input.env)?;
 
         sqlx::query(
             r#"
             INSERT INTO workers (id, runner_name, command, args, event_type, filters,
-                concurrency, instance_path, status, detached, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                concurrency, instance_path, status, detached, created_at, updated_at, env, pipeline_steps)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
@@ -2005,6 +2014,8 @@ pub mod workers {
         .bind(input.detached)
         .bind(&now)
         .bind(&now)
+        .bind(&env_json)
+        .bind(&input.pipeline_steps)
         .execute(pool)
         .await?;
 
@@ -2020,7 +2031,7 @@ pub mod workers {
     const WORKER_COLUMNS: &str = r#"
         id, runner_name, command, args, event_type, filters, concurrency,
         instance_path, status, error_message, pid, detached, created_at,
-        updated_at, stopped_at, last_event_id
+        updated_at, stopped_at, last_event_id, env, pipeline_steps
     "#;
 
     /// Get a worker by ID

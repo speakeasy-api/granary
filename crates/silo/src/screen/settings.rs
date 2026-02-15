@@ -575,9 +575,12 @@ fn action_row<'a>(
 ) -> Element<'a, Message> {
     let name_text = text(name).size(14).color(palette.text);
 
-    let command_text = text(format!("Command: {}", config.command))
-        .size(FONT_SIZE_SMALL)
-        .color(palette.text_secondary);
+    let command_text = text(format!(
+        "Command: {}",
+        config.command.as_deref().unwrap_or("<pipeline>")
+    ))
+    .size(FONT_SIZE_SMALL)
+    .color(palette.text_secondary);
 
     let event_str = config.on.as_deref().unwrap_or("(none)");
     let concurrency_str = config

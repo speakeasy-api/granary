@@ -262,7 +262,7 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
     };
 
     // Validate we have either a runner, action, or an inline command
-    let (command, final_args, final_concurrency, final_event_type) =
+    let (command, final_args, final_concurrency, final_event_type, final_env, pipeline_steps) =
         match (&runner_name, &action_name, &inline_command) {
             (Some(name), None, None) => {
                 // Load runner from config
@@ -273,6 +273,17 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
                 let runner = if let Some(ref action_name) = runner.action {
                     let action = global_config_service::get_action(action_name)?
                         .ok_or_else(|| GranaryError::ActionNotFound(action_name.clone()))?;
+
+                    // Reject runners that reference pipeline actions
+                    if action.is_pipeline() {
+                        return Err(GranaryError::InvalidArgument(format!(
+                            "Runner '{}' references pipeline action '{}'. \
+                             Runners cannot override command/args of pipeline actions. \
+                             Use --action instead to start a pipeline directly.",
+                            name, action_name
+                        )));
+                    }
+
                     merge_action_with_runner(&action, &runner)
                 } else {
                     runner
@@ -301,6 +312,8 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
                     merged_args,
                     concurrency,
                     resolved_event_type,
+                    runner.env,
+                    None, // runners never produce pipeline_steps
                 )
             }
             (None, Some(name), None) => {
@@ -321,15 +334,44 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
                     ))
                 })?;
 
-                let mut merged_args = action.expand_env_in_args();
-                merged_args.extend(cli_args);
+                if action.is_pipeline() {
+                    // Pipeline action: serialize steps and use first step's command for display
+                    let steps = action.steps.as_ref().unwrap();
+                    let pipeline_steps_json = serde_json::to_string(steps).map_err(|e| {
+                        GranaryError::InvalidArgument(format!(
+                            "Failed to serialize pipeline steps: {}",
+                            e
+                        ))
+                    })?;
 
-                (
-                    action.command,
-                    merged_args,
-                    concurrency,
-                    resolved_event_type,
-                )
+                    // Use first step's command/action for backwards-compatible display
+                    let display_command = steps
+                        .first()
+                        .and_then(|s| s.command.clone().or_else(|| s.action.clone()))
+                        .unwrap_or_else(|| "pipeline".to_string());
+
+                    (
+                        display_command,
+                        cli_args, // pipeline args are per-step, not top-level
+                        concurrency,
+                        resolved_event_type,
+                        action.env,
+                        Some(pipeline_steps_json),
+                    )
+                } else {
+                    // Simple action: existing behavior
+                    let mut merged_args = action.expand_env_in_args();
+                    merged_args.extend(cli_args);
+
+                    (
+                        action.command.unwrap_or_default(),
+                        merged_args,
+                        concurrency,
+                        resolved_event_type,
+                        action.env,
+                        None, // simple action, no pipeline_steps
+                    )
+                }
             }
             (None, None, Some(cmd)) => {
                 // Inline command requires --on
@@ -338,7 +380,14 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
                         "Must specify --on event type when using inline --command".to_string(),
                     )
                 })?;
-                (cmd.clone(), cli_args, concurrency, resolved_event_type)
+                (
+                    cmd.clone(),
+                    cli_args,
+                    concurrency,
+                    resolved_event_type,
+                    std::collections::HashMap::new(),
+                    None,
+                )
             }
             (None, None, None) => {
                 return Err(GranaryError::InvalidArgument(
@@ -370,6 +419,8 @@ async fn start_worker(args: StartWorkerArgs) -> Result<()> {
         instance_path,
         attach: !detached,
         since: resolved_since,
+        env: final_env,
+        pipeline_steps,
     };
 
     let worker = client.start_worker(req).await?;

@@ -1,0 +1,12 @@
+description = "Run a task using opencode"
+command = "opencode"
+args = [
+    "run",
+    "$(granary work start {id})",
+    "--format",
+    "json",
+]
+concurrency = 3
+on = "task.next"
+
+[env]

@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "sqlx")]
 use sqlx::FromRow;
 
+use crate::global_config::StepConfig;
+
 /// Worker status enum representing the lifecycle states of a worker process
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -85,6 +87,10 @@ pub struct Worker {
     pub stopped_at: Option<String>,
     /// ID of the last processed event for cursor-based polling
     pub last_event_id: i64,
+    /// Environment variables to set when spawning runners (stored as JSON object)
+    pub env: String,
+    /// Pipeline steps (stored as JSON array when set). When non-null, worker executes as a pipeline.
+    pub pipeline_steps: Option<String>,
 }
 
 impl Worker {
@@ -106,6 +112,25 @@ impl Worker {
     /// Check if the worker is currently running
     pub fn is_running(&self) -> bool {
         self.status_enum() == WorkerStatus::Running
+    }
+
+    /// Parse the env JSON string to a Vec<(String, String)>
+    pub fn env_vec(&self) -> Vec<(String, String)> {
+        let map: std::collections::HashMap<String, String> =
+            serde_json::from_str(&self.env).unwrap_or_default();
+        map.into_iter().collect()
+    }
+
+    /// Check if the worker is a pipeline (has pipeline_steps set).
+    pub fn is_pipeline(&self) -> bool {
+        self.pipeline_steps.is_some()
+    }
+
+    /// Parse the pipeline_steps JSON string to a Vec<StepConfig>.
+    pub fn pipeline_steps_vec(&self) -> Option<Vec<StepConfig>> {
+        self.pipeline_steps
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok())
     }
 
     /// Check if the worker has stopped (either normally or with error)
@@ -130,6 +155,10 @@ pub struct CreateWorker {
     pub detached: bool,
     /// Resolved ISO timestamp to start processing events from (ephemeral, not persisted)
     pub since: Option<String>,
+    /// Environment variables to set when spawning runners
+    pub env: std::collections::HashMap<String, String>,
+    /// Pipeline steps (JSON-encoded). When set, worker executes as a pipeline.
+    pub pipeline_steps: Option<String>,
 }
 
 impl Default for CreateWorker {
@@ -144,6 +173,8 @@ impl Default for CreateWorker {
             instance_path: String::new(),
             detached: false,
             since: None,
+            env: std::collections::HashMap::new(),
+            pipeline_steps: None,
         }
     }
 }

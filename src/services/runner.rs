@@ -10,6 +10,7 @@
 use std::path::Path;
 use std::process::Stdio;
 
+use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 
 use crate::error::{GranaryError, Result};
@@ -117,6 +118,178 @@ impl RunnerHandle {
             self.child.start_kill().map_err(GranaryError::Io)
         }
     }
+}
+
+/// Result of a completed pipeline step.
+pub struct PipelineStepResult {
+    /// Captured stdout, trimmed of leading/trailing whitespace.
+    pub stdout: String,
+    /// Process exit code (-1 if the process was killed without a code).
+    pub exit_code: i32,
+}
+
+/// Handle to a spawned pipeline step process with piped stdout.
+///
+/// Unlike `RunnerHandle`, this captures stdout so the caller can read
+/// the process output for passing to subsequent pipeline steps.
+pub struct PipelineStepHandle {
+    child: Child,
+    pid: u32,
+    stdout: tokio::process::ChildStdout,
+}
+
+impl PipelineStepHandle {
+    /// Wait for the process to exit, reading all stdout.
+    ///
+    /// Returns a `PipelineStepResult` with the trimmed stdout and exit code.
+    pub async fn wait(mut self) -> Result<PipelineStepResult> {
+        let mut output = String::new();
+        self.stdout.read_to_string(&mut output).await?;
+
+        let status = self.child.wait().await?;
+        let exit_code = status.code().unwrap_or(-1);
+
+        Ok(PipelineStepResult {
+            stdout: output.trim().to_string(),
+            exit_code,
+        })
+    }
+
+    /// Wait for the process to exit or cancel it when the signal fires.
+    ///
+    /// If `cancel_rx` receives `true` before the process exits, the child
+    /// process group is killed and a `Cancelled` error is returned.
+    pub async fn wait_or_cancel(
+        mut self,
+        cancel_rx: &mut tokio::sync::watch::Receiver<bool>,
+    ) -> Result<PipelineStepResult> {
+        // Check if already cancelled before we start waiting
+        if *cancel_rx.borrow() {
+            self.kill().await?;
+            return Err(GranaryError::Cancelled("Pipeline cancelled".to_string()));
+        }
+
+        let mut output = String::new();
+
+        tokio::select! {
+            biased;
+
+            result = cancel_rx.changed() => {
+                // Channel changed — check if it's a cancellation signal.
+                // If the sender was dropped (Err), treat it as normal completion path.
+                if result.is_ok() && *cancel_rx.borrow() {
+                    self.kill().await?;
+                    return Err(GranaryError::Cancelled("Pipeline cancelled".to_string()));
+                }
+                // Sender dropped or non-cancel value; fall through to wait normally
+                self.stdout.read_to_string(&mut output).await?;
+                let status = self.child.wait().await?;
+                let exit_code = status.code().unwrap_or(-1);
+                Ok(PipelineStepResult {
+                    stdout: output.trim().to_string(),
+                    exit_code,
+                })
+            }
+
+            read_result = self.stdout.read_to_string(&mut output) => {
+                read_result?;
+                let status = self.child.wait().await?;
+                let exit_code = status.code().unwrap_or(-1);
+                Ok(PipelineStepResult {
+                    stdout: output.trim().to_string(),
+                    exit_code,
+                })
+            }
+        }
+    }
+
+    /// Kill the process and its entire process group.
+    ///
+    /// On Unix, sends SIGKILL to the process group. On other platforms,
+    /// kills just the process.
+    pub async fn kill(&mut self) -> Result<()> {
+        #[cfg(unix)]
+        {
+            let pid = self.pid as i32;
+            // SAFETY: libc::kill with negative pid sends signal to process group
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+            let _ = self.child.start_kill();
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        {
+            self.child.kill().await.map_err(GranaryError::Io)
+        }
+    }
+}
+
+/// Spawn a runner process with piped stdout for pipeline step execution.
+///
+/// Unlike `spawn_runner_with_env` which sends stdout to a log file, this
+/// variant pipes stdout so the caller can capture it for passing to
+/// subsequent pipeline steps. Stderr is directed to the log file.
+///
+/// # Arguments
+/// * `command` - The command to execute
+/// * `args` - Arguments to pass to the command
+/// * `working_dir` - Working directory for the spawned process
+/// * `env_vars` - Environment variables to set for the process
+/// * `log_file` - Path to the log file for stderr
+///
+/// # Returns
+/// A `PipelineStepHandle` with access to the stdout reader.
+pub async fn spawn_runner_piped(
+    command: &str,
+    args: &[String],
+    working_dir: &Path,
+    env_vars: &[(String, String)],
+    log_file: &Path,
+) -> Result<PipelineStepHandle> {
+    // Ensure log file parent directory exists
+    if let Some(parent) = log_file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let stderr_file = std::fs::File::create(log_file)?;
+
+    let mut cmd = Command::new(command);
+    cmd.args(args)
+        .current_dir(working_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(stderr_file));
+
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+
+    #[cfg(unix)]
+    // SAFETY: setsid() is safe to call in pre_exec - it creates a new session
+    // and process group, making this process the leader.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        GranaryError::Io(std::io::Error::new(
+            e.kind(),
+            format!("Failed to spawn pipeline step '{}': {}", command, e),
+        ))
+    })?;
+
+    let pid = child.id().ok_or_else(|| {
+        GranaryError::Conflict("Failed to get PID of spawned process".to_string())
+    })?;
+
+    let stdout = child.stdout.take().ok_or_else(|| {
+        GranaryError::Conflict("Failed to capture stdout of spawned process".to_string())
+    })?;
+
+    Ok(PipelineStepHandle { child, pid, stdout })
 }
 
 /// Spawn a runner process for a run.
@@ -388,5 +561,39 @@ mod tests {
         let dir = Path::new("/var/logs");
         let path = log_path("run-abc123", dir);
         assert_eq!(path, Path::new("/var/logs/run-abc123.log"));
+    }
+
+    #[tokio::test]
+    async fn test_spawn_runner_piped_captures_stdout() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_file = temp_dir.path().join("step.log");
+
+        let handle = spawn_runner_piped(
+            "echo",
+            &["hello".to_string()],
+            temp_dir.path(),
+            &[],
+            &log_file,
+        )
+        .await
+        .unwrap();
+
+        let result = handle.wait().await.unwrap();
+        assert_eq!(result.stdout, "hello");
+        assert_eq!(result.exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn test_spawn_runner_piped_nonzero_exit() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_file = temp_dir.path().join("step.log");
+
+        let handle = spawn_runner_piped("false", &[], temp_dir.path(), &[], &log_file)
+            .await
+            .unwrap();
+
+        let result = handle.wait().await.unwrap();
+        assert_eq!(result.stdout, "");
+        assert_eq!(result.exit_code, 1);
     }
 }

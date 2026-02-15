@@ -1,0 +1,15 @@
+description = "Run a task using Cursor agent"
+command = "cursor"
+args = [
+    "agent",
+    "-p",
+    "$(granary work start {id})",
+    "--output-format",
+    "stream-json",
+    "--force",
+    "--trust",
+]
+concurrency = 3
+on = "task.next"
+
+[env]

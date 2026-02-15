@@ -1,0 +1,16 @@
+description = "Run a task using Claude Code"
+command = "claude"
+args = [
+    "-p",
+    "$(granary work start {id})",
+    "--dangerously-skip-permissions",
+    "--model",
+    "sonnet",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+]
+concurrency = 3
+on = "task.next"
+
+[env]

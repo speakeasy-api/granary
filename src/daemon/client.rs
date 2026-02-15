@@ -834,7 +834,8 @@ mod tests {
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-01T00:00:00Z",
             "stopped_at": null,
-            "last_event_id": 0
+            "last_event_id": 0,
+            "env": "{}"
         });
 
         let worker: Worker = serde_json::from_value(worker_json).unwrap();
@@ -885,6 +886,8 @@ mod tests {
             instance_path: "/home/user/project".to_string(),
             attach: true,
             since: None,
+            env: std::collections::HashMap::new(),
+            pipeline_steps: None,
         };
 
         let json = serde_json::to_string(&req).unwrap();

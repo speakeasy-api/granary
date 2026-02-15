@@ -3,7 +3,7 @@ use crate::cli::args::{
 };
 use crate::db;
 use crate::error::Result;
-use crate::models::{ActionConfig, RunnerConfig};
+use crate::models::{ActionConfig, OnError, RunnerConfig};
 use crate::output::Output;
 use crate::services::{Workspace, global_config_service};
 use std::collections::HashMap;
@@ -352,7 +352,7 @@ impl Output for ActionsListOutput {
                     format!(
                         "- `{}` -> `{} {}`",
                         name,
-                        action.command,
+                        action.command.as_deref().unwrap_or("<pipeline>"),
                         action.args.join(" ")
                     )
                 })
@@ -370,9 +370,12 @@ impl Output for ActionsListOutput {
                 lines.push(format!(
                     "  {} -> {} {}",
                     name,
-                    action.command,
+                    action.command.as_deref().unwrap_or("<pipeline>"),
                     action.args.join(" ")
                 ));
+                if let Some(ref desc) = action.description {
+                    lines.push(format!("    description: {}", desc));
+                }
                 if let Some(c) = action.concurrency {
                     lines.push(format!("    concurrency: {}", c));
                 }
@@ -404,36 +407,189 @@ pub struct ActionShowOutput {
 
 impl Output for ActionShowOutput {
     fn to_json(&self) -> String {
-        serde_json::json!({"name": &self.name, "action": &self.action}).to_string()
+        let mut json = serde_json::json!({
+            "name": &self.name,
+            "action": &self.action,
+        });
+
+        // Add type and steps for pipeline display
+        if self.action.is_pipeline() {
+            json["type"] = serde_json::json!("pipeline");
+            if let Some(steps) = &self.action.steps {
+                let steps_json: Vec<serde_json::Value> = steps
+                    .iter()
+                    .enumerate()
+                    .map(|(i, step)| {
+                        let mut s = serde_json::json!({
+                            "name": step.resolved_name(i),
+                        });
+                        if let Some(action) = &step.action {
+                            s["action"] = serde_json::json!(action);
+                        }
+                        if let Some(command) = &step.command {
+                            s["command"] = serde_json::json!(command);
+                        }
+                        if let Some(cwd) = &step.cwd {
+                            s["cwd"] = serde_json::json!(cwd);
+                        }
+                        if let Some(on_error) = &step.on_error {
+                            s["on_error"] = match on_error {
+                                OnError::Stop => serde_json::json!("stop"),
+                                OnError::Continue => serde_json::json!("continue"),
+                            };
+                        }
+                        s
+                    })
+                    .collect();
+                json["steps"] = serde_json::json!(steps_json);
+            }
+        } else {
+            json["type"] = serde_json::json!("simple");
+        }
+
+        json.to_string()
     }
 
     fn to_prompt(&self) -> String {
-        format!(
-            "Action `{}`:\n- command: `{}`",
-            self.name, self.action.command
-        )
+        if self.action.is_pipeline() {
+            let steps = self.action.steps.as_ref().unwrap();
+            let step_count = steps.len();
+            let mut parts = vec![];
+
+            // Header
+            let mut header = format!(
+                "Action \"{}\" is a pipeline with {} step{}",
+                self.name,
+                step_count,
+                if step_count == 1 { "" } else { "s" }
+            );
+            if let Some(ref on) = self.action.on {
+                header.push_str(&format!(" triggered on {}", on));
+            }
+            if let Some(c) = self.action.concurrency {
+                header.push_str(&format!(" (concurrency: {})", c));
+            }
+            header.push('.');
+
+            if let Some(ref desc) = self.action.description {
+                header.push_str(&format!(" {}", desc));
+            }
+
+            parts.push(header);
+            parts.push("Steps:".to_string());
+
+            for (i, step) in steps.iter().enumerate() {
+                let name = step.resolved_name(i);
+                let mut desc = if let Some(action) = &step.action {
+                    format!("runs action {}", action)
+                } else if let Some(command) = &step.command {
+                    format!("runs command {}", command)
+                } else {
+                    "unknown".to_string()
+                };
+                if let Some(cwd) = &step.cwd {
+                    desc.push_str(&format!(" with cwd={}", cwd));
+                }
+                if let Some(OnError::Continue) = &step.on_error {
+                    desc.push_str(" (on_error: continue)");
+                }
+                parts.push(format!("{}. {} - {}", i + 1, name, desc));
+            }
+
+            parts.join("\n")
+        } else {
+            let mut parts = vec![format!("Action \"{}\" is a simple action", self.name)];
+            if let Some(ref cmd) = self.action.command {
+                parts[0].push_str(&format!(" running command `{}`", cmd));
+            }
+            if let Some(ref on) = self.action.on {
+                parts[0].push_str(&format!(" triggered on {}", on));
+            }
+            if let Some(c) = self.action.concurrency {
+                parts[0].push_str(&format!(" (concurrency: {})", c));
+            }
+            parts[0].push('.');
+            if let Some(ref desc) = self.action.description {
+                parts.push(desc.clone());
+            }
+            parts.join("\n")
+        }
     }
 
     fn to_text(&self) -> String {
-        let mut lines = vec![
-            format!("Action: {}\n", self.name),
-            format!("  command: {}", self.action.command),
-        ];
-        if !self.action.args.is_empty() {
-            lines.push(format!("  args: {:?}", self.action.args));
+        let mut lines = vec![];
+
+        // Name
+        lines.push(format!("  Name:        {}", self.name));
+
+        // Description
+        if let Some(ref desc) = self.action.description {
+            lines.push(format!("  Description: {}", desc));
         }
-        if let Some(c) = self.action.concurrency {
-            lines.push(format!("  concurrency: {}", c));
-        }
+
+        // Event
         if let Some(ref on) = self.action.on {
-            lines.push(format!("  on: {}", on));
+            lines.push(format!("  Event:       {}", on));
         }
-        if !self.action.env.is_empty() {
-            lines.push("  env:".to_string());
-            for (k, v) in &self.action.env {
-                lines.push(format!("    {}={}", k, v));
+
+        // Concurrency
+        if let Some(c) = self.action.concurrency {
+            lines.push(format!("  Concurrency: {}", c));
+        }
+
+        if self.action.is_pipeline() {
+            let steps = self.action.steps.as_ref().unwrap();
+            lines.push(format!("  Type:        pipeline ({} steps)", steps.len()));
+
+            // Env (pipeline-level)
+            if !self.action.env.is_empty() {
+                lines.push("  Env:".to_string());
+                for (k, v) in &self.action.env {
+                    lines.push(format!("    {}={}", k, v));
+                }
+            }
+
+            lines.push(String::new());
+            lines.push("  Steps:".to_string());
+
+            for (i, step) in steps.iter().enumerate() {
+                let name = step.resolved_name(i);
+                let step_type = if step.action.is_some() {
+                    "[action]"
+                } else {
+                    "[command]"
+                };
+                let mut detail = format!("    {}. {}   {}", i + 1, name, step_type);
+                if let Some(cwd) = &step.cwd {
+                    detail.push_str(&format!("  cwd={}", cwd));
+                }
+                if let Some(OnError::Continue) = &step.on_error {
+                    detail.push_str("  on_error=continue");
+                }
+                lines.push(detail);
+            }
+        } else {
+            lines.push("  Type:        simple".to_string());
+
+            // Command
+            if let Some(ref cmd) = self.action.command {
+                lines.push(format!("  Command:     {}", cmd));
+            }
+
+            // Args
+            if !self.action.args.is_empty() {
+                lines.push(format!("  Args:        {:?}", self.action.args));
+            }
+
+            // Env
+            if !self.action.env.is_empty() {
+                lines.push("  Env:".to_string());
+                for (k, v) in &self.action.env {
+                    lines.push(format!("    {}={}", k, v));
+                }
             }
         }
+
         lines.join("\n")
     }
 }
@@ -482,6 +638,7 @@ async fn handle_actions_action(
         Some(ActionsAction::Add {
             name,
             command,
+            description,
             args,
             concurrency,
             on,
@@ -489,12 +646,14 @@ async fn handle_actions_action(
         }) => {
             let env = parse_env_vars(&env_vars);
             let action = ActionConfig {
-                command,
+                description,
+                command: Some(command),
                 args,
                 concurrency,
                 on,
                 env,
                 action: None,
+                steps: None,
             };
             global_config_service::set_action(&name, action)?;
             println!("Added action: {}", name);
@@ -503,6 +662,7 @@ async fn handle_actions_action(
         Some(ActionsAction::Update {
             name,
             command,
+            description,
             args,
             concurrency,
             on,
@@ -512,7 +672,10 @@ async fn handle_actions_action(
             match existing {
                 Some(mut action) => {
                     if let Some(cmd) = command {
-                        action.command = cmd;
+                        action.command = Some(cmd);
+                    }
+                    if description.is_some() {
+                        action.description = description;
                     }
                     if let Some(a) = args {
                         action.args = a;
@@ -669,7 +832,7 @@ async fn handle_runners_action(
 }
 
 /// Parse environment variables from "KEY=VALUE" format
-fn parse_env_vars(env_vars: &[String]) -> HashMap<String, String> {
+pub fn parse_env_vars(env_vars: &[String]) -> HashMap<String, String> {
     env_vars
         .iter()
         .filter_map(|s| {
