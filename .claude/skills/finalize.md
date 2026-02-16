@@ -12,9 +12,4 @@ After a project is complete (no outstanding tasks):
 3. **Run tests**: Run `cargo test`
 4. **Handle failures**: If tests fail, create new tasks to fix the failing tests and stop
 5. **If all tests pass**:
-   - Assess the changes made during the project
-   - Increment the version in `Cargo.toml` according to semver:
-     - **patch**: bug fixes, minor improvements
-     - **minor**: new features, backwards-compatible changes
-     - **major**: breaking changes
-   - Create a PR using `gh pr create` with a summary of changes
+   - Run the `/shipit` skill to determine the semver bump, record release notes via boop, commit, push, and open a PR

@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
 
 permissions:
   contents: write
@@ -12,8 +11,43 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check:
+    name: Check for release
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.boop.outputs.released }}
+      version: ${{ steps.boop.outputs.version }}
+      changelog: ${{ steps.boop.outputs.changelog }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run boop
+        id: boop
+        uses: danielkov/boop@v1
+
+      - name: Update Cargo.toml and tag
+        if: steps.boop.outputs.released == 'true'
+        run: |
+          VERSION="${{ steps.boop.outputs.version }}"
+          # Install Rust for cargo update
+          rustup default stable
+          # Update workspace version in Cargo.toml
+          sed -i "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$VERSION\"/" Cargo.toml
+          cargo update --workspace
+          # Commit and tag
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .boop/releases.toml Cargo.toml Cargo.lock
+          git commit -m "ci(boop): release $VERSION [skip ci]
+
+          ${{ steps.boop.outputs.changelog }}"
+          git tag "v$VERSION"
+          git push origin main --follow-tags
+
   build:
     name: Build ${{ matrix.target }}
+    needs: [check]
+    if: needs.check.outputs.released == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -42,6 +76,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.check.outputs.version }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -69,7 +105,7 @@ jobs:
           mkdir -p Silo.app/Contents/MacOS Silo.app/Contents/Resources
           cp target/${{ matrix.target }}/release/silo Silo.app/Contents/MacOS/Silo
           cp crates/silo/resources/AppIcon.icns Silo.app/Contents/Resources/AppIcon.icns
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION="${{ needs.check.outputs.version }}"
           cat > Silo.app/Contents/Info.plist << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -114,7 +150,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: build
+    needs: [check, build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -140,8 +176,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.check.outputs.version }}
+          name: v${{ needs.check.outputs.version }}
+          body: ${{ needs.check.outputs.changelog }}
           files: |
             release/*
-          generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          prerelease: ${{ contains(needs.check.outputs.version, '-') }}
