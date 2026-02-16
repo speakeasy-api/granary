@@ -414,7 +414,7 @@ mod tests {
         let project = services::create_project(
             &pool,
             CreateProject {
-                name: "unique-xyz-name".to_string(),
+                name: "uniquexyzname".to_string(),
                 ..Default::default()
             },
         )
@@ -422,7 +422,7 @@ mod tests {
         .unwrap();
 
         // The only match for this query is the excluded project itself
-        let results = find_prior_art(&pool, "unique-xyz-name", &project.id)
+        let results = find_prior_art(&pool, "uniquexyzname", &project.id)
             .await
             .unwrap();
 
