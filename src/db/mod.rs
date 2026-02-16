@@ -1811,56 +1811,122 @@ pub mod config {
     }
 }
 
-/// Database operations for search
+/// Database operations for search (FTS5-backed)
 pub mod search {
     use granary_types::{Project, Task};
 
     use super::*;
 
-    /// Search projects by name (case-insensitive)
-    /// TODO: need to migrate this to FTS5
-    pub async fn search_projects(pool: &SqlitePool, query: &str) -> Result<Vec<Project>> {
-        let projects = sqlx::query_as::<_, Project>(
+    #[derive(Debug, sqlx::FromRow)]
+    pub struct FtsMatch {
+        pub entity_type: String,
+        pub entity_id: String,
+        pub rank: f64,
+    }
+
+    /// Search all entity types using FTS5 full-text search with BM25 ranking
+    pub async fn search_all(pool: &SqlitePool, query: &str, limit: i32) -> Result<Vec<FtsMatch>> {
+        let rows = sqlx::query_as::<_, FtsMatch>(
             r#"
-            SELECT * FROM projects
-            WHERE name LIKE ? COLLATE NOCASE
-            ORDER BY created_at DESC
+            SELECT entity_type, entity_id, rank
+            FROM search_index
+            WHERE search_index MATCH ?
+            ORDER BY bm25(search_index, 0.0, 0.0, 10.0, 1.0, 2.0)
+            LIMIT ?
             "#,
         )
-        .bind(format!("%{}%", query))
+        .bind(query)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Search projects using FTS5 full-text search
+    pub async fn search_projects(pool: &SqlitePool, query: &str) -> Result<Vec<Project>> {
+        let ids = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT entity_id
+            FROM search_index
+            WHERE search_index MATCH ? AND entity_type = 'project'
+            ORDER BY bm25(search_index, 0.0, 0.0, 10.0, 1.0, 2.0)
+            LIMIT 50
+            "#,
+        )
+        .bind(query)
+        .fetch_all(pool)
+        .await?;
+
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let json_ids = serde_json::to_string(&ids)?;
+        let projects = sqlx::query_as::<_, Project>(
+            "SELECT * FROM projects WHERE id IN (SELECT value FROM json_each(?))",
+        )
+        .bind(json_ids)
         .fetch_all(pool)
         .await?;
         Ok(projects)
     }
 
-    /// Search tasks by title (case-insensitive)
+    /// Search tasks using FTS5 full-text search
     pub async fn search_tasks(pool: &SqlitePool, query: &str) -> Result<Vec<Task>> {
-        let tasks = sqlx::query_as::<_, Task>(
+        let ids = sqlx::query_scalar::<_, String>(
             r#"
-            SELECT * FROM tasks
-            WHERE title LIKE ? COLLATE NOCASE
-            ORDER BY created_at DESC
+            SELECT entity_id
+            FROM search_index
+            WHERE search_index MATCH ? AND entity_type = 'task'
+            ORDER BY bm25(search_index, 0.0, 0.0, 10.0, 1.0, 2.0)
+            LIMIT 50
             "#,
         )
-        .bind(format!("%{}%", query))
+        .bind(query)
+        .fetch_all(pool)
+        .await?;
+
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let json_ids = serde_json::to_string(&ids)?;
+        let tasks = sqlx::query_as::<_, Task>(
+            "SELECT * FROM tasks WHERE id IN (SELECT value FROM json_each(?))",
+        )
+        .bind(json_ids)
         .fetch_all(pool)
         .await?;
         Ok(tasks)
     }
 
-    /// Search initiatives by name (case-insensitive)
+    /// Search initiatives using FTS5 full-text search
     pub async fn search_initiatives(
         pool: &SqlitePool,
         query: &str,
     ) -> Result<Vec<crate::models::Initiative>> {
-        let initiatives = sqlx::query_as::<_, crate::models::Initiative>(
+        let ids = sqlx::query_scalar::<_, String>(
             r#"
-            SELECT * FROM initiatives
-            WHERE name LIKE ? COLLATE NOCASE
-            ORDER BY created_at DESC
+            SELECT entity_id
+            FROM search_index
+            WHERE search_index MATCH ? AND entity_type = 'initiative'
+            ORDER BY bm25(search_index, 0.0, 0.0, 10.0, 1.0, 2.0)
+            LIMIT 50
             "#,
         )
-        .bind(format!("%{}%", query))
+        .bind(query)
+        .fetch_all(pool)
+        .await?;
+
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let json_ids = serde_json::to_string(&ids)?;
+        let initiatives = sqlx::query_as::<_, crate::models::Initiative>(
+            "SELECT * FROM initiatives WHERE id IN (SELECT value FROM json_each(?))",
+        )
+        .bind(json_ids)
         .fetch_all(pool)
         .await?;
         Ok(initiatives)
