@@ -948,7 +948,7 @@ impl WorkerRuntime {
             task.run_ids = Some(serde_json::to_string(&run_ids)?);
 
             // Set owner to run_id only when unset
-            if task.owner.as_ref().map_or(true, |o| o.is_empty()) {
+            if task.owner.as_ref().is_none_or(|o| o.is_empty()) {
                 task.owner = Some(run_id.to_string());
             }
 
