@@ -427,6 +427,9 @@ impl WorkerRuntime {
 
         let run = db::runs::create(&self.global_pool, &create_run).await?;
 
+        // Associate the run with the originating task (if applicable)
+        self.associate_run_with_task(&event, &run.id).await;
+
         // Update log path with actual run ID
         let log_path = self.log_dir.join(format!("{}.log", run.id));
         sqlx::query("UPDATE runs SET log_path = ? WHERE id = ?")
@@ -437,7 +440,9 @@ impl WorkerRuntime {
 
         // Spawn the runner in the workspace directory with env vars
         let workspace_path = std::path::Path::new(&self.worker.instance_path);
-        let env_vars = self.worker.env_vec();
+        let mut env_vars = self.worker.env_vec();
+        env_vars.push(("GRANARY_WORKER_ID".to_string(), self.worker.id.clone()));
+        env_vars.push(("GRANARY_RUN_ID".to_string(), run.id.clone()));
         let handle = spawn_runner_with_env(&run, &self.log_dir, workspace_path, &env_vars).await?;
 
         // Update run status to running with PID
@@ -500,6 +505,9 @@ impl WorkerRuntime {
 
         let run = db::runs::create(&self.global_pool, &create_run).await?;
 
+        // Associate the run with the originating task (if applicable)
+        self.associate_run_with_task(&event, &run.id).await;
+
         // Update log path with actual run ID
         let log_path = self.log_dir.join(format!("{}.log", run.id));
         sqlx::query("UPDATE runs SET log_path = ? WHERE id = ?")
@@ -537,6 +545,7 @@ impl WorkerRuntime {
         // check_completed_runs → handle_run_completion can update
         // the DB status and handle retries uniformly.
         let worker_id = self.worker.id.clone();
+        let run_id = run.id.clone();
         let workspace_path = PathBuf::from(&self.worker.instance_path);
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel(false);
@@ -544,6 +553,7 @@ impl WorkerRuntime {
         let join_handle = tokio::spawn(async move {
             let result = execute_pipeline(
                 &worker_id,
+                &run_id,
                 &workspace_path,
                 &event,
                 &log_path,
@@ -745,6 +755,7 @@ impl WorkerRuntime {
 
         // Spawn the pipeline as a background task (same as handle_pipeline_event)
         let worker_id = self.worker.id.clone();
+        let run_id = run.id.clone();
         let workspace_path = PathBuf::from(&self.worker.instance_path);
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel(false);
@@ -752,6 +763,7 @@ impl WorkerRuntime {
         let join_handle = tokio::spawn(async move {
             let result = execute_pipeline(
                 &worker_id,
+                &run_id,
                 &workspace_path,
                 &event,
                 &log_path,
@@ -898,6 +910,67 @@ impl WorkerRuntime {
     pub fn log_dir(&self) -> &PathBuf {
         &self.log_dir
     }
+
+    /// Associate a run with its originating task by updating the task's
+    /// `worker_ids`, `run_ids`, and `owner` fields.
+    ///
+    /// - `worker_ids`: appended with this worker's ID (deduplicated)
+    /// - `run_ids`: always appended with the new run ID
+    /// - `owner`: set to the run ID only when currently unset
+    ///
+    /// Only applies when the event's `entity_type` is "task". Errors are
+    /// logged but do not fail the run.
+    async fn associate_run_with_task(&self, event: &Event, run_id: &str) {
+        if event.entity_type != "task" {
+            return;
+        }
+
+        let task_id = &event.entity_id;
+
+        let result: Result<()> = async {
+            // Fetch the task from the workspace DB
+            let mut task = db::tasks::get(&self.workspace_pool, task_id)
+                .await?
+                .ok_or_else(|| {
+                    GranaryError::Conflict(format!("Task {} not found in workspace DB", task_id))
+                })?;
+
+            // Append worker_id (deduplicated)
+            let mut worker_ids = task.worker_ids_vec();
+            if !worker_ids.contains(&self.worker.id) {
+                worker_ids.push(self.worker.id.clone());
+            }
+            task.worker_ids = Some(serde_json::to_string(&worker_ids)?);
+
+            // Append run_id
+            let mut run_ids = task.run_ids_vec();
+            run_ids.push(run_id.to_string());
+            task.run_ids = Some(serde_json::to_string(&run_ids)?);
+
+            // Set owner to run_id only when unset
+            if task.owner.as_ref().map_or(true, |o| o.is_empty()) {
+                task.owner = Some(run_id.to_string());
+            }
+
+            let updated = db::tasks::update(&self.workspace_pool, &task).await?;
+            if !updated {
+                eprintln!(
+                    "[worker:{}] Version conflict: run {} association with task {} was not persisted (task was concurrently modified)",
+                    self.worker.id, run_id, task_id
+                );
+            }
+
+            Ok(())
+        }
+        .await;
+
+        if let Err(e) = result {
+            eprintln!(
+                "[worker:{}] Failed to associate run {} with task {}: {}",
+                self.worker.id, run_id, task_id, e
+            );
+        }
+    }
 }
 
 /// Execute a pipeline: run resolved steps serially with output passing.
@@ -914,6 +987,7 @@ impl WorkerRuntime {
 /// pipeline returns a `Cancelled` error.
 async fn execute_pipeline(
     worker_id: &str,
+    run_id: &str,
     workspace_path: &Path,
     event: &Event,
     log_path: &Path,
@@ -970,6 +1044,9 @@ async fn execute_pipeline(
                 Ok((k.clone(), resolved_v))
             })
             .collect::<Result<Vec<_>>>()?;
+        let mut resolved_env = resolved_env;
+        resolved_env.push(("GRANARY_WORKER_ID".to_string(), worker_id.to_string()));
+        resolved_env.push(("GRANARY_RUN_ID".to_string(), run_id.to_string()));
 
         // 4. Spawn piped process
         // Use a per-step stderr log so spawn_runner_piped can direct stderr there
@@ -1226,6 +1303,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1296,6 +1374,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1349,6 +1428,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1410,6 +1490,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1473,6 +1554,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1523,6 +1605,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1568,6 +1651,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1618,6 +1702,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1655,6 +1740,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1798,6 +1884,7 @@ mod tests {
 
         let result = execute_pipeline(
             "test-worker",
+            "test-run",
             tmp.path(),
             &event,
             &log_path,
@@ -1845,6 +1932,7 @@ mod tests {
             async move {
                 execute_pipeline(
                     "test-worker",
+                    "test-run",
                     &tmp_path,
                     &event,
                     &log_path,

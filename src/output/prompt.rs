@@ -736,6 +736,8 @@ mod tests {
             priority: "P1".to_string(),
             owner: Some("test-user".to_string()),
             tags: None,
+            worker_ids: None,
+            run_ids: None,
             blocked_reason: None,
             started_at: None,
             completed_at: None,

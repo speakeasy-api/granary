@@ -386,10 +386,11 @@ pub mod tasks {
         sqlx::query(
             r#"
             INSERT INTO tasks (id, project_id, task_number, parent_task_id, title, description,
-                status, priority, owner, tags, blocked_reason, started_at, completed_at, due_at,
+                status, priority, owner, tags, worker_ids, run_ids, blocked_reason,
+                started_at, completed_at, due_at,
                 claim_owner, claim_claimed_at, claim_lease_expires_at, pinned, focus_weight,
                 created_at, updated_at, version, last_edited_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&task.id)
@@ -402,6 +403,8 @@ pub mod tasks {
         .bind(&task.priority)
         .bind(&task.owner)
         .bind(&task.tags)
+        .bind(&task.worker_ids)
+        .bind(&task.run_ids)
         .bind(&task.blocked_reason)
         .bind(&task.started_at)
         .bind(&task.completed_at)
@@ -495,6 +498,7 @@ pub mod tasks {
             r#"
             UPDATE tasks
             SET title = ?, description = ?, status = ?, priority = ?, owner = ?, tags = ?,
+                worker_ids = ?, run_ids = ?,
                 blocked_reason = ?, started_at = ?, completed_at = ?, due_at = ?,
                 claim_owner = ?, claim_claimed_at = ?, claim_lease_expires_at = ?,
                 pinned = ?, focus_weight = ?, updated_at = ?, version = version + 1,
@@ -508,6 +512,8 @@ pub mod tasks {
         .bind(&task.priority)
         .bind(&task.owner)
         .bind(&task.tags)
+        .bind(&task.worker_ids)
+        .bind(&task.run_ids)
         .bind(&task.blocked_reason)
         .bind(&task.started_at)
         .bind(&task.completed_at)

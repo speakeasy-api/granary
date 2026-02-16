@@ -5,6 +5,7 @@
 
 use crate::appearance::{self, Palette};
 use crate::message::Message;
+use crate::screen::Screen;
 use crate::widget::{self, icon};
 use granary_types::{
     Initiative, InitiativeBlockerInfo, InitiativeStatus, InitiativeSummary, ProjectSummary,
@@ -879,6 +880,54 @@ fn view_task_row<'a>(
                 .spacing(8)
                 .into(),
             );
+        }
+
+        // Workers
+        let worker_ids = task.worker_ids_vec();
+        if !worker_ids.is_empty() {
+            let mut worker_row_items: Vec<Element<'a, Message>> = Vec::new();
+            worker_row_items.push(text("Workers:").size(11).color(palette.text_muted).into());
+            for wid in worker_ids {
+                let accent = palette.accent;
+                let nav_screen = Screen::WorkerDetail { id: wid.clone() };
+                worker_row_items.push(
+                    button(text(wid).size(11).color(accent).font(iced::Font::MONOSPACE))
+                        .on_press(Message::Navigate(nav_screen))
+                        .padding(0)
+                        .style(move |_, _| button::Style {
+                            background: None,
+                            ..Default::default()
+                        })
+                        .into(),
+                );
+            }
+            details.push(
+                iced::widget::Row::from_vec(worker_row_items)
+                    .spacing(8)
+                    .into(),
+            );
+        }
+
+        // Runs
+        let run_ids = task.run_ids_vec();
+        if !run_ids.is_empty() {
+            let mut run_row_items: Vec<Element<'a, Message>> = Vec::new();
+            run_row_items.push(text("Runs:").size(11).color(palette.text_muted).into());
+            for rid in run_ids {
+                let accent = palette.accent;
+                let nav_screen = Screen::RunDetail { id: rid.clone() };
+                run_row_items.push(
+                    button(text(rid).size(11).color(accent).font(iced::Font::MONOSPACE))
+                        .on_press(Message::Navigate(nav_screen))
+                        .padding(0)
+                        .style(move |_, _| button::Style {
+                            background: None,
+                            ..Default::default()
+                        })
+                        .into(),
+                );
+            }
+            details.push(iced::widget::Row::from_vec(run_row_items).spacing(8).into());
         }
 
         // Task ID

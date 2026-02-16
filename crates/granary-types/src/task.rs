@@ -22,6 +22,10 @@ pub struct Task {
     #[serde(default)]
     pub tags: Option<String>,
     #[serde(default)]
+    pub worker_ids: Option<String>,
+    #[serde(default)]
+    pub run_ids: Option<String>,
+    #[serde(default)]
     pub blocked_reason: Option<String>,
     #[serde(default)]
     pub started_at: Option<String>,
@@ -57,6 +61,20 @@ impl Task {
 
     pub fn tags_vec(&self) -> Vec<String> {
         self.tags
+            .as_ref()
+            .and_then(|t| serde_json::from_str(t).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn worker_ids_vec(&self) -> Vec<String> {
+        self.worker_ids
+            .as_ref()
+            .and_then(|t| serde_json::from_str(t).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn run_ids_vec(&self) -> Vec<String> {
+        self.run_ids
             .as_ref()
             .and_then(|t| serde_json::from_str(t).ok())
             .unwrap_or_default()
@@ -240,6 +258,8 @@ pub struct UpdateTask {
     pub priority: Option<TaskPriority>,
     pub owner: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub worker_ids: Option<Vec<String>>,
+    pub run_ids: Option<Vec<String>>,
     pub blocked_reason: Option<String>,
     pub due_at: Option<String>,
     pub pinned: Option<bool>,

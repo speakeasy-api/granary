@@ -34,6 +34,8 @@ pub async fn create_task(pool: &SqlitePool, input: CreateTask) -> Result<Task> {
         priority: input.priority.as_str().to_string(),
         owner: input.owner.clone(),
         tags,
+        worker_ids: None,
+        run_ids: None,
         blocked_reason: None,
         started_at: None,
         completed_at: None,
@@ -107,6 +109,12 @@ pub async fn update_task(pool: &SqlitePool, id: &str, updates: UpdateTask) -> Re
     }
     if let Some(tags) = updates.tags {
         task.tags = Some(serde_json::to_string(&tags)?);
+    }
+    if let Some(worker_ids) = updates.worker_ids {
+        task.worker_ids = Some(serde_json::to_string(&worker_ids)?);
+    }
+    if let Some(run_ids) = updates.run_ids {
+        task.run_ids = Some(serde_json::to_string(&run_ids)?);
     }
     if let Some(reason) = updates.blocked_reason {
         task.blocked_reason = Some(reason);

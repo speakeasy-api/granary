@@ -55,6 +55,8 @@ mod tests {
             priority: "P2".to_string(),
             owner: None,
             tags: None,
+            worker_ids: None,
+            run_ids: None,
             blocked_reason: None,
             started_at: None,
             completed_at: None,
