@@ -1792,7 +1792,7 @@ dependencies = [
 
 [[package]]
 name = "granary"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "granary-types"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "chrono",
  "rand 0.10.0",
@@ -4550,7 +4550,7 @@ dependencies = [
 
 [[package]]
 name = "silo"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
