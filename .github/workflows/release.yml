@@ -18,6 +18,7 @@ jobs:
       released: ${{ steps.boop.outputs.released }}
       version: ${{ steps.boop.outputs.version }}
       changelog: ${{ steps.boop.outputs.changelog }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +27,7 @@ jobs:
         uses: danielkov/boop@v1
 
       - name: Update Cargo.toml and tag
+        id: release
         if: steps.boop.outputs.released == 'true'
         run: |
           VERSION="${{ steps.boop.outputs.version }}"
@@ -43,6 +45,7 @@ jobs:
           ${{ steps.boop.outputs.changelog }}"
           git tag "v$VERSION"
           git push origin main --follow-tags
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.target }}
@@ -77,7 +80,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: v${{ needs.check.outputs.version }}
+          ref: ${{ needs.check.outputs.sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
