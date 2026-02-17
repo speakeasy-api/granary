@@ -557,6 +557,17 @@ pub mod tasks {
                   WHERE td.task_id = t.id
                     AND dep.status != 'done'
               )
+              AND NOT EXISTS (
+                  SELECT 1 FROM project_dependencies pd
+                  JOIN projects dep_p ON dep_p.id = pd.depends_on_project_id
+                  WHERE pd.project_id = t.project_id
+                    AND dep_p.status NOT IN ('done', 'archived')
+                    AND EXISTS (
+                        SELECT 1 FROM tasks dep_t
+                        WHERE dep_t.project_id = pd.depends_on_project_id
+                          AND dep_t.status != 'done'
+                    )
+              )
         "#;
 
         let mut query = base_query.to_string();
@@ -622,6 +633,17 @@ pub mod tasks {
                   JOIN tasks dep ON dep.id = td.depends_on_task_id
                   WHERE td.task_id = t.id
                     AND dep.status != 'done'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM project_dependencies pd
+                  JOIN projects dep_p ON dep_p.id = pd.depends_on_project_id
+                  WHERE pd.project_id = t.project_id
+                    AND dep_p.status NOT IN ('done', 'archived')
+                    AND EXISTS (
+                        SELECT 1 FROM tasks dep_t
+                        WHERE dep_t.project_id = pd.depends_on_project_id
+                          AND dep_t.status != 'done'
+                    )
               )
         "#;
 
@@ -1985,7 +2007,9 @@ pub mod initiative_tasks {
             let unmet_count: (i64,) = sqlx::query_as(
                 r#"
                 SELECT COUNT(*) FROM project_dependencies pd
+                JOIN projects dep_p ON dep_p.id = pd.depends_on_project_id
                 WHERE pd.project_id = ?
+                AND dep_p.status NOT IN ('done', 'archived')
                 AND EXISTS (
                     SELECT 1 FROM tasks t
                     WHERE t.project_id = pd.depends_on_project_id

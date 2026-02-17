@@ -11,3 +11,5 @@
 
 - This repo has a build-time check in `build.rs` that fails compilation when two migration files share the same numeric version prefix.
 - Treat that failure as a naming/version collision and regenerate one of the conflicting migrations.
+
+IMPORTANT: when user requests to "use granary", run `granary` command before performing any other task.
