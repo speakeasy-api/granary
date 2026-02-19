@@ -1852,8 +1852,35 @@ pub mod search {
         pub rank: f64,
     }
 
+    /// Common English stop words that are too generic to be useful search terms.
+    const STOP_WORDS: &[&str] = &[
+        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "has", "have", "in",
+        "is", "it", "its", "not", "of", "on", "or", "that", "the", "this", "to", "was", "with",
+    ];
+
+    /// Sanitize a user query for FTS5 by individually quoting each token
+    /// and joining them with OR for lenient matching.
+    /// Drops punctuation-only tokens and common stop words to avoid
+    /// matching nearly everything in the index.
+    fn sanitize_fts5_query(query: &str) -> String {
+        query
+            .split_whitespace()
+            .filter(|token| token.chars().any(|c| c.is_alphanumeric()))
+            .filter(|token| !STOP_WORDS.contains(&token.to_ascii_lowercase().as_str()))
+            .map(|token| {
+                let escaped = token.replace('"', "\"\"");
+                format!("\"{escaped}\"")
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    }
+
     /// Search all entity types using FTS5 full-text search with BM25 ranking
     pub async fn search_all(pool: &SqlitePool, query: &str, limit: i32) -> Result<Vec<FtsMatch>> {
+        let sanitized = sanitize_fts5_query(query);
+        if sanitized.is_empty() {
+            return Ok(Vec::new());
+        }
         let rows = sqlx::query_as::<_, FtsMatch>(
             r#"
             SELECT entity_type, entity_id, rank
@@ -1863,7 +1890,7 @@ pub mod search {
             LIMIT ?
             "#,
         )
-        .bind(query)
+        .bind(&sanitized)
         .bind(limit)
         .fetch_all(pool)
         .await?;
@@ -1872,6 +1899,10 @@ pub mod search {
 
     /// Search projects using FTS5 full-text search
     pub async fn search_projects(pool: &SqlitePool, query: &str) -> Result<Vec<Project>> {
+        let sanitized = sanitize_fts5_query(query);
+        if sanitized.is_empty() {
+            return Ok(Vec::new());
+        }
         let ids = sqlx::query_scalar::<_, String>(
             r#"
             SELECT entity_id
@@ -1881,7 +1912,7 @@ pub mod search {
             LIMIT 50
             "#,
         )
-        .bind(query)
+        .bind(&sanitized)
         .fetch_all(pool)
         .await?;
 
@@ -1901,6 +1932,10 @@ pub mod search {
 
     /// Search tasks using FTS5 full-text search
     pub async fn search_tasks(pool: &SqlitePool, query: &str) -> Result<Vec<Task>> {
+        let sanitized = sanitize_fts5_query(query);
+        if sanitized.is_empty() {
+            return Ok(Vec::new());
+        }
         let ids = sqlx::query_scalar::<_, String>(
             r#"
             SELECT entity_id
@@ -1910,7 +1945,7 @@ pub mod search {
             LIMIT 50
             "#,
         )
-        .bind(query)
+        .bind(&sanitized)
         .fetch_all(pool)
         .await?;
 
@@ -1933,6 +1968,10 @@ pub mod search {
         pool: &SqlitePool,
         query: &str,
     ) -> Result<Vec<crate::models::Initiative>> {
+        let sanitized = sanitize_fts5_query(query);
+        if sanitized.is_empty() {
+            return Ok(Vec::new());
+        }
         let ids = sqlx::query_scalar::<_, String>(
             r#"
             SELECT entity_id
@@ -1942,7 +1981,7 @@ pub mod search {
             LIMIT 50
             "#,
         )
-        .bind(query)
+        .bind(&sanitized)
         .fetch_all(pool)
         .await?;
 
@@ -1958,6 +1997,58 @@ pub mod search {
         .fetch_all(pool)
         .await?;
         Ok(initiatives)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn sanitize_plain_words() {
+            assert_eq!(sanitize_fts5_query("hello world"), r#""hello" OR "world""#);
+        }
+
+        #[test]
+        fn sanitize_dash_and_stop_words() {
+            // The bare `-` is dropped (no alphanumeric chars)
+            // "from" is a stop word and also dropped
+            assert_eq!(
+                sanitize_fts5_query("Fix TypeScript v2 build failures - 11 root causes from SDK"),
+                r#""Fix" OR "TypeScript" OR "v2" OR "build" OR "failures" OR "11" OR "root" OR "causes" OR "SDK""#
+            );
+        }
+
+        #[test]
+        fn sanitize_embedded_quotes() {
+            assert_eq!(
+                sanitize_fts5_query(r#"say "hello""#),
+                "\"say\" OR \"\"\"hello\"\"\"",
+            );
+        }
+
+        #[test]
+        fn sanitize_empty_query() {
+            assert_eq!(sanitize_fts5_query(""), "");
+        }
+
+        #[test]
+        fn sanitize_single_word() {
+            assert_eq!(sanitize_fts5_query("auth"), r#""auth""#);
+        }
+
+        #[test]
+        fn sanitize_stop_words_removed() {
+            // "the", "from", "a" are stop words — only content words survive
+            assert_eq!(
+                sanitize_fts5_query("migrate the database from a server"),
+                r#""migrate" OR "database" OR "server""#
+            );
+        }
+
+        #[test]
+        fn sanitize_all_stop_words_returns_empty() {
+            assert_eq!(sanitize_fts5_query("the and or"), "");
+        }
     }
 }
 
