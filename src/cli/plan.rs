@@ -431,4 +431,34 @@ mod tests {
             "prior art should be empty when the only match is excluded"
         );
     }
+
+    #[tokio::test]
+    async fn test_find_prior_art_with_special_characters() {
+        let (pool, _temp) = setup_test_db().await;
+
+        let project = services::create_project(
+            &pool,
+            CreateProject {
+                name: "TypeScript SDK battery tests".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // Query contains `-` which is an FTS5 NOT operator when unescaped
+        let results = find_prior_art(
+            &pool,
+            "Fix TypeScript v2 build failures - 11 root causes from SDK battery tests",
+            "nonexistent-id",
+        )
+        .await
+        .unwrap();
+
+        let result_ids: Vec<&str> = results.iter().map(|r| r.project.id.as_str()).collect();
+        assert!(
+            result_ids.contains(&project.id.as_str()),
+            "search with special characters should still find matching projects"
+        );
+    }
 }
