@@ -93,13 +93,23 @@ fn format_initiative_guidance(
         output.push('\n');
     }
 
-    output.push_str("\n## Planning Multi-Project Initiatives\n\n");
-    output.push_str("As the initiative planning agent, you should:\n");
+    output.push_str("\n## CRITICAL: Delegation-Only Workflow\n\n");
     output.push_str(
-        "1. Analyze the initiative scope and break it into discrete projects, with explicit boundaries\n",
+        "You are the initiative coordinator. Your job is to create projects and delegate.\n",
     );
-    output.push_str("2. Create each project with a comprehensive description\n");
-    output.push_str("3. Launch sub-agents to plan each project in parallel\n\n");
+    output.push_str(
+        "Do NOT create tasks directly. Do NOT use `granary project <id> tasks create`.\n",
+    );
+    output
+        .push_str("Task creation is handled by sub-agents via `granary plan --project <id>`.\n\n");
+
+    output.push_str("## Workflow\n\n");
+    output.push_str("1. Create projects with descriptions (Step 1 below)\n");
+    output.push_str("2. Set inter-project dependencies (Step 2 below)\n");
+    output.push_str(
+        "3. Delegate planning to sub-agents: `granary plan --project <id>` for each project\n",
+    );
+    output.push_str("4. Verify the initiative\n\n");
 
     output.push_str("## Step 1: Create Projects\n\n");
     output.push_str("For each component of the initiative, create a project:\n\n");
@@ -123,11 +133,13 @@ fn format_initiative_guidance(
     output.push_str("If projects depend on each other:\n\n");
     output.push_str("  granary project <project-id> deps add <depends-on-project-id>\n\n");
 
-    output.push_str("## Step 3: Launch Sub-Agents for Planning\n\n");
+    output.push_str("## Step 3: Delegate Planning to Sub-Agents\n\n");
     output.push_str("For each project, launch a sub-agent with:\n\n");
     output.push_str("  granary plan --project <project-id>\n\n");
-    output.push_str("The sub-agent will receive the project context and create tasks.\n");
-    output.push_str("Run sub-agents in parallel for independent projects.\n\n");
+    output
+        .push_str("Each sub-agent will research the codebase and create tasks for its project.\n");
+    output.push_str("Run sub-agents in parallel for independent projects.\n");
+    output.push_str("Do NOT create tasks yourself — this is the sub-agent's responsibility.\n\n");
 
     output.push_str("## Step 4: Verify Initiative\n\n");
     output.push_str("After sub-agents complete planning:\n\n");
