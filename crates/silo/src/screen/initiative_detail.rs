@@ -329,35 +329,43 @@ fn view_progress_section<'a>(
     let track_bg = palette.card;
     let fill_bg = palette.accent;
 
-    // Large progress bar - ensure FillPortion is at least 1 to avoid layout issues
+    // Large progress bar - conditionally add fill/remaining so 0% and 100% render correctly
     let fill_portion = ((percent * 100.0) as u16).max(1);
-    let progress_bar = container(
-        container("")
-            .width(Length::FillPortion(fill_portion))
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: if percent > 0.0 {
-                    Some(Background::Color(fill_bg))
-                } else {
-                    None
-                },
-                border: Border {
-                    radius: Radius::from(appearance::CORNER_RADIUS),
+    let remaining_portion = (((1.0 - percent) * 100.0) as u16).max(1);
+    let mut bar_row = iced::widget::Row::new().height(Length::Fill);
+    if percent > 0.0 {
+        bar_row = bar_row.push(
+            container("")
+                .width(Length::FillPortion(fill_portion))
+                .height(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(Background::Color(fill_bg)),
+                    border: Border {
+                        radius: Radius::from(appearance::CORNER_RADIUS),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
+                }),
+        );
+    }
+    if percent < 1.0 {
+        bar_row = bar_row.push(
+            container("")
+                .width(Length::FillPortion(remaining_portion))
+                .height(Length::Fill),
+        );
+    }
+    let progress_bar = container(bar_row)
+        .width(Length::Fill)
+        .height(Length::Fixed(12.0))
+        .style(move |_| container::Style {
+            background: Some(Background::Color(track_bg)),
+            border: Border {
+                radius: Radius::from(appearance::CORNER_RADIUS),
                 ..Default::default()
-            }),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(12.0))
-    .style(move |_| container::Style {
-        background: Some(Background::Color(track_bg)),
-        border: Border {
-            radius: Radius::from(appearance::CORNER_RADIUS),
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    });
+        });
 
     let content = column![
         row![
@@ -446,35 +454,43 @@ fn view_project_card<'a>(
         palette.accent
     };
 
-    // Mini progress bar - ensure FillPortion is at least 1 to avoid layout issues
+    // Mini progress bar - conditionally add fill/remaining so 0% and 100% render correctly
     let fill_portion = ((progress * 100.0) as u16).max(1);
-    let progress_bar = container(
-        container("")
-            .width(Length::FillPortion(fill_portion))
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: if progress > 0.0 {
-                    Some(Background::Color(fill_bg))
-                } else {
-                    None
-                },
-                border: Border {
-                    radius: Radius::from(2.0),
+    let remaining_portion = (((1.0 - progress) * 100.0) as u16).max(1);
+    let mut bar_row = iced::widget::Row::new().height(Length::Fill);
+    if progress > 0.0 {
+        bar_row = bar_row.push(
+            container("")
+                .width(Length::FillPortion(fill_portion))
+                .height(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(Background::Color(fill_bg)),
+                    border: Border {
+                        radius: Radius::from(2.0),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
+                }),
+        );
+    }
+    if progress < 1.0 {
+        bar_row = bar_row.push(
+            container("")
+                .width(Length::FillPortion(remaining_portion))
+                .height(Length::Fill),
+        );
+    }
+    let progress_bar = container(bar_row)
+        .width(Length::Fill)
+        .height(Length::Fixed(4.0))
+        .style(move |_| container::Style {
+            background: Some(Background::Color(track_bg)),
+            border: Border {
+                radius: Radius::from(2.0),
                 ..Default::default()
-            }),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(4.0))
-    .style(move |_| container::Style {
-        background: Some(Background::Color(track_bg)),
-        border: Border {
-            radius: Radius::from(2.0),
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    });
+        });
 
     // Blocked indicator
     let blocked_indicator: Element<'a, Message> = if project.blocked {
