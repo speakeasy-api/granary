@@ -1,4 +1,4 @@
-version = "1.4.5"
+version = "1.4.6"
 
 [releases."1.2.1"]
 entries = ["patch-01khkj64ppmws0zfsp3jszp5dp.md"]
@@ -29,3 +29,20 @@ entries = [
     "patch-01kj3a82xept7aw2yb2dtkzefk.md",
     "patch-01kj3dnnk0dbxrjpsfcxkk697e.md",
 ]
+
+[releases."1.4.6"]
+entries = [
+    "patch-01kj3p0tgck8yhrjgk4x3fb5fa.md",
+    "patch-01kj3r2xz0yw7dtzzzz7q0qsne.md",
+]
+release_group = "rg-01kj3sy053a17nnhq71ftm51bn"
+
+[[release_groups]]
+id = "rg-01kj3sy053a17nnhq71ftm51bn"
+workspaces = ["root"]
+
+[release_groups.before]
+root = "1.4.5"
+
+[release_groups.after]
+root = "1.4.6"
