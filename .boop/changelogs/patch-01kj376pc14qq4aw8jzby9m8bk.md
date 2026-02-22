@@ -31,8 +31,8 @@ When an agent runs `granary plan "Feature name"` (without `--project`), the outp
 
 This workflow is for planning ONE project with tasks.
 If this is part of a multi-project initiative, stop here.
-Use `granary initiate "Initiative name"` instead — it will coordinate
-project creation and delegate task planning to sub-agents.
+Use `granary initiate "Initiative name"` instead — it guides you through
+creating projects and delegating task planning to sub-agents.
 ```
 
 #### Entrypoint and help text now distinguish the two paths
@@ -49,5 +49,5 @@ The `--help` text also adds an explicit note:
 
 ```
 NOTE: Do NOT use `granary plan` for multi-project work.
-`initiate` coordinates projects and delegates task planning to sub-agents.
+`initiate` guides you through creating projects and delegating task planning to sub-agents.
 ```
