@@ -16,7 +16,7 @@ AGENTS (AI/LLM):
   Multiple projects (cross-cutting work):
     granary initiate \"Initiative name\"
     NOTE: Do NOT use `granary plan` for multi-project work.
-    `initiate` coordinates projects and delegates task planning to sub-agents.
+    `initiate` guides you through creating projects and delegating task planning to sub-agents.
 
   Work on a task:
     granary work start <task-id>

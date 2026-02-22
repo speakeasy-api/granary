@@ -202,8 +202,8 @@ fn format_planning_guidance(project: &Project, prior_art: &[ProjectWithProgress]
     output.push_str("## Scope: Single-Project Planning\n\n");
     output.push_str("This workflow is for planning ONE project with tasks.\n");
     output.push_str("If this is part of a multi-project initiative, stop here.\n");
-    output.push_str("Use `granary initiate \"Initiative name\"` instead — it will coordinate\n");
-    output.push_str("project creation and delegate task planning to sub-agents.\n\n");
+    output.push_str("Use `granary initiate \"Initiative name\"` instead — it guides you through\n");
+    output.push_str("creating projects and delegating task planning to sub-agents.\n\n");
 
     // Prior Art section
     output.push_str("## Prior Art\n\n");
