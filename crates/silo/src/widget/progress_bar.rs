@@ -74,36 +74,44 @@ fn progress_bar_inner<'a, Message: 'a>(
     let track_bg = p.card;
     let fill_bg = p.accent;
 
-    // Use layered containers for track and fill - ensure FillPortion is at least 1
+    // Use FillPortion with two siblings so they split space proportionally
     let fill_portion = ((value * 100.0) as u16).max(1);
-    container(
-        container("")
-            .width(Length::FillPortion(fill_portion))
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: if value > 0.0 {
-                    Some(Background::Color(fill_bg))
-                } else {
-                    None
-                },
-                border: Border {
-                    radius: Radius::from(CORNER_RADIUS_SMALL),
+    let remaining_portion = (((1.0 - value) * 100.0) as u16).max(1);
+    let mut bar_row = iced::widget::Row::new().height(Length::Fill);
+    if value > 0.0 {
+        bar_row = bar_row.push(
+            container("")
+                .width(Length::FillPortion(fill_portion))
+                .height(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(Background::Color(fill_bg)),
+                    border: Border {
+                        radius: Radius::from(CORNER_RADIUS_SMALL),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
+                }),
+        );
+    }
+    if value < 1.0 {
+        bar_row = bar_row.push(
+            container("")
+                .width(Length::FillPortion(remaining_portion))
+                .height(Length::Fill),
+        );
+    }
+    container(bar_row)
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
+        .style(move |_| container::Style {
+            background: Some(Background::Color(track_bg)),
+            border: Border {
+                radius: Radius::from(CORNER_RADIUS_SMALL),
                 ..Default::default()
-            }),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(height))
-    .style(move |_| container::Style {
-        background: Some(Background::Color(track_bg)),
-        border: Border {
-            radius: Radius::from(CORNER_RADIUS_SMALL),
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    })
-    .into()
+        })
+        .into()
 }
 
 /// Convenience function for creating progress bars
