@@ -1,4 +1,4 @@
-version = "1.4.2"
+version = "1.4.3"
 
 [releases."1.2.1"]
 entries = ["patch-01khkj64ppmws0zfsp3jszp5dp.md"]
@@ -17,3 +17,6 @@ entries = ["patch-01khp50xsyd47awswyph8bwa31.md"]
 
 [releases."1.4.2"]
 entries = ["patch-01khv1ya5cxbd9av0mznpv3pe9.md"]
+
+[releases."1.4.3"]
+entries = ["patch-01kj38wz92k71p6cz1r85jgye0.md"]
