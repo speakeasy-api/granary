@@ -561,7 +561,7 @@ pub mod tasks {
                   SELECT 1 FROM project_dependencies pd
                   JOIN projects dep_p ON dep_p.id = pd.depends_on_project_id
                   WHERE pd.project_id = t.project_id
-                    AND dep_p.status NOT IN ('done', 'archived')
+                    AND dep_p.status NOT IN ('done', 'completed', 'archived')
                     AND EXISTS (
                         SELECT 1 FROM tasks dep_t
                         WHERE dep_t.project_id = pd.depends_on_project_id
@@ -638,7 +638,7 @@ pub mod tasks {
                   SELECT 1 FROM project_dependencies pd
                   JOIN projects dep_p ON dep_p.id = pd.depends_on_project_id
                   WHERE pd.project_id = t.project_id
-                    AND dep_p.status NOT IN ('done', 'archived')
+                    AND dep_p.status NOT IN ('done', 'completed', 'archived')
                     AND EXISTS (
                         SELECT 1 FROM tasks dep_t
                         WHERE dep_t.project_id = pd.depends_on_project_id
@@ -2100,7 +2100,7 @@ pub mod initiative_tasks {
                 SELECT COUNT(*) FROM project_dependencies pd
                 JOIN projects dep_p ON dep_p.id = pd.depends_on_project_id
                 WHERE pd.project_id = ?
-                AND dep_p.status NOT IN ('done', 'archived')
+                AND dep_p.status NOT IN ('done', 'completed', 'archived')
                 AND EXISTS (
                     SELECT 1 FROM tasks t
                     WHERE t.project_id = pd.depends_on_project_id
