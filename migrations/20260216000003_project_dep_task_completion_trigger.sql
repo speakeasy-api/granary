@@ -108,11 +108,10 @@ BEGIN
   );
 END;
 
--- 2b. Task transitions to 'todo' status (only on actual status change, not any update)
+-- 2b. Task transitions to 'todo' status
 CREATE TRIGGER trg_task_next_on_status_todo
 AFTER UPDATE ON tasks
 WHEN NEW.status = 'todo'
-  AND OLD.status != 'todo'
   AND NEW.blocked_reason IS NULL
   AND (NEW.claim_owner IS NULL OR NEW.claim_lease_expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   AND NOT EXISTS (
