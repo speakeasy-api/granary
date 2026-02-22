@@ -271,13 +271,12 @@ pub async fn block_task(pool: &SqlitePool, id: &str, reason: &str) -> Result<Tas
 pub async fn unblock_task(pool: &SqlitePool, id: &str) -> Result<Task> {
     let mut task = get_task(pool, id).await?;
 
-    // Return to in_progress if it was started, otherwise todo
-    task.status = if task.started_at.is_some() {
-        TaskStatus::InProgress.as_str().to_string()
-    } else {
-        TaskStatus::Todo.as_str().to_string()
-    };
+    task.status = TaskStatus::Todo.as_str().to_string();
     task.blocked_reason = None;
+    // Clear stale claim so task.next trigger can fire
+    task.claim_owner = None;
+    task.claim_claimed_at = None;
+    task.claim_lease_expires_at = None;
     // Set actor for trigger-based events (system action)
     task.last_edited_by = None;
 
