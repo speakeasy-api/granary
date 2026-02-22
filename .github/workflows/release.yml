@@ -40,9 +40,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .boop/releases.toml Cargo.toml Cargo.lock
-          git commit -m "ci(boop): release $VERSION [skip ci]
+          cat > /tmp/commit-msg.txt <<'COMMIT_MSG'
+          ci(boop): release ${{ steps.boop.outputs.version }} [skip ci]
 
-          ${{ steps.boop.outputs.changelog }}"
+          ${{ steps.boop.outputs.changelog }}
+          COMMIT_MSG
+          git commit -F /tmp/commit-msg.txt
           git tag "v$VERSION"
           git push origin main --follow-tags
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
