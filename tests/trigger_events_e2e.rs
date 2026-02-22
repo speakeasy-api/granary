@@ -1225,6 +1225,204 @@ async fn test_task_next_not_emitted_when_partial_project_dep_satisfied() {
 }
 
 // ============================================================================
+// task.next deduplication: no spurious re-emission on non-status updates
+// ============================================================================
+
+#[tokio::test]
+async fn test_task_next_not_re_emitted_on_non_status_updates() {
+    let pool = setup_pool().await;
+    let project = create_project(&pool, "no-loop-proj").await;
+
+    // Create a todo task → should emit exactly 1 task.next
+    let task = create_task(&pool, &project.id, "stable task", "todo").await;
+
+    let next_count_after_create = events_of_type(&pool, "task.next")
+        .await
+        .into_iter()
+        .filter(|e| e.entity_id == task.id)
+        .count();
+    assert_eq!(
+        next_count_after_create, 1,
+        "should have exactly 1 task.next after creation"
+    );
+
+    // Simulate worker setting owner (like a runner claiming work) — status stays 'todo'
+    let mut task = db::tasks::get(&pool, &task.id).await.expect("get").unwrap();
+    task.owner = Some("run-abc123".to_string());
+    db::tasks::update(&pool, &task).await.expect("set owner");
+
+    let next_count_after_owner = events_of_type(&pool, "task.next")
+        .await
+        .into_iter()
+        .filter(|e| e.entity_id == task.id)
+        .count();
+    assert_eq!(
+        next_count_after_owner, 1,
+        "setting owner on a todo task should NOT re-emit task.next"
+    );
+
+    // Simulate worker setting worker_ids — status still 'todo'
+    let mut task = db::tasks::get(&pool, &task.id).await.expect("get").unwrap();
+    task.worker_ids = Some("worker-1".to_string());
+    db::tasks::update(&pool, &task)
+        .await
+        .expect("set worker_ids");
+
+    let next_count_after_worker = events_of_type(&pool, "task.next")
+        .await
+        .into_iter()
+        .filter(|e| e.entity_id == task.id)
+        .count();
+    assert_eq!(
+        next_count_after_worker, 1,
+        "setting worker_ids on a todo task should NOT re-emit task.next"
+    );
+
+    // Transition to in_progress — should NOT emit task.next
+    let mut task = db::tasks::get(&pool, &task.id).await.expect("get").unwrap();
+    task.status = "in_progress".to_string();
+    task.started_at = Some(chrono::Utc::now().to_rfc3339());
+    db::tasks::update(&pool, &task).await.expect("start task");
+
+    let next_count_after_start = events_of_type(&pool, "task.next")
+        .await
+        .into_iter()
+        .filter(|e| e.entity_id == task.id)
+        .count();
+    assert_eq!(
+        next_count_after_start, 1,
+        "transitioning to in_progress should NOT emit task.next"
+    );
+
+    // Complete the task — should NOT emit task.next
+    let mut task = db::tasks::get(&pool, &task.id).await.expect("get").unwrap();
+    task.status = "done".to_string();
+    task.completed_at = Some(chrono::Utc::now().to_rfc3339());
+    db::tasks::update(&pool, &task)
+        .await
+        .expect("complete task");
+
+    let next_count_after_done = events_of_type(&pool, "task.next")
+        .await
+        .into_iter()
+        .filter(|e| e.entity_id == task.id)
+        .count();
+    assert_eq!(
+        next_count_after_done, 1,
+        "completing the task should NOT emit task.next for itself"
+    );
+}
+
+#[tokio::test]
+async fn test_task_next_full_lifecycle_with_project_deps() {
+    let pool = setup_pool().await;
+
+    // Setup: Backend project (dependency) with one task, Frontend depends on it
+    let backend = create_project(&pool, "lifecycle-backend").await;
+    let frontend = create_project(&pool, "lifecycle-frontend").await;
+    db::project_dependencies::add(&pool, &frontend.id, &backend.id)
+        .await
+        .expect("add project dep");
+
+    let backend_task = create_task(&pool, &backend.id, "backend work", "in_progress").await;
+    let frontend_task = create_task(&pool, &frontend.id, "frontend work", "todo").await;
+
+    // Helper: count task.next events for a given task
+    async fn count_next(pool: &sqlx::SqlitePool, task_id: &str) -> usize {
+        events_of_type(pool, "task.next")
+            .await
+            .into_iter()
+            .filter(|e| e.entity_id == task_id)
+            .count()
+    }
+
+    // Frontend task should have 0 task.next (blocked by project dep)
+    assert_eq!(
+        count_next(&pool, &frontend_task.id).await,
+        0,
+        "frontend task should be blocked initially"
+    );
+
+    // Complete backend task → auto-completes backend project → cascade fires task.next
+    let mut backend_task = db::tasks::get(&pool, &backend_task.id)
+        .await
+        .expect("get")
+        .unwrap();
+    backend_task.status = "done".to_string();
+    backend_task.completed_at = Some(chrono::Utc::now().to_rfc3339());
+    db::tasks::update(&pool, &backend_task)
+        .await
+        .expect("complete backend");
+
+    assert_eq!(
+        count_next(&pool, &frontend_task.id).await,
+        1,
+        "frontend task should get exactly 1 task.next after project dep satisfied"
+    );
+
+    // Simulate worker updating the frontend task (sets owner) — should NOT re-emit
+    let mut ft = db::tasks::get(&pool, &frontend_task.id)
+        .await
+        .expect("get")
+        .unwrap();
+    ft.owner = Some("run-xyz".to_string());
+    db::tasks::update(&pool, &ft).await.expect("set owner");
+
+    assert_eq!(
+        count_next(&pool, &frontend_task.id).await,
+        1,
+        "setting owner should NOT re-emit task.next"
+    );
+
+    // Worker updates again (sets worker_ids, run_ids) — should NOT re-emit
+    let mut ft = db::tasks::get(&pool, &frontend_task.id)
+        .await
+        .expect("get")
+        .unwrap();
+    ft.worker_ids = Some("w1".to_string());
+    ft.run_ids = Some("r1".to_string());
+    db::tasks::update(&pool, &ft)
+        .await
+        .expect("set worker/run ids");
+
+    assert_eq!(
+        count_next(&pool, &frontend_task.id).await,
+        1,
+        "setting worker_ids/run_ids should NOT re-emit task.next"
+    );
+
+    // Transition to in_progress — no new task.next
+    let mut ft = db::tasks::get(&pool, &frontend_task.id)
+        .await
+        .expect("get")
+        .unwrap();
+    ft.status = "in_progress".to_string();
+    ft.started_at = Some(chrono::Utc::now().to_rfc3339());
+    db::tasks::update(&pool, &ft).await.expect("start");
+
+    assert_eq!(
+        count_next(&pool, &frontend_task.id).await,
+        1,
+        "starting the task should NOT emit task.next"
+    );
+
+    // Complete — no new task.next for this task
+    let mut ft = db::tasks::get(&pool, &frontend_task.id)
+        .await
+        .expect("get")
+        .unwrap();
+    ft.status = "done".to_string();
+    ft.completed_at = Some(chrono::Utc::now().to_rfc3339());
+    db::tasks::update(&pool, &ft).await.expect("complete");
+
+    assert_eq!(
+        count_next(&pool, &frontend_task.id).await,
+        1,
+        "completing the task should NOT emit task.next for itself"
+    );
+}
+
+// ============================================================================
 // Project auto-complete trigger tests
 // ============================================================================
 
