@@ -230,29 +230,41 @@ impl WorkerManager {
             let _ = handle.shutdown_tx.send(true);
         }
 
-        // Collect all task handles
-        let handles: Vec<_> = workers.drain().map(|(_, h)| h.task).collect();
-
-        if handles.is_empty() {
-            return Ok(());
+        // Collect worker IDs and task handles
+        let mut worker_ids = Vec::new();
+        let mut handles = Vec::new();
+        for (id, handle) in workers.drain() {
+            worker_ids.push(id);
+            handles.push(handle.task);
         }
 
-        // Wait for all tasks with timeout using JoinSet
-        let deadline = Duration::from_secs(30);
-        let mut join_set = tokio::task::JoinSet::new();
+        if !handles.is_empty() {
+            // Wait for all tasks with timeout using JoinSet
+            let deadline = Duration::from_secs(30);
+            let mut join_set = tokio::task::JoinSet::new();
 
-        for handle in handles {
-            join_set.spawn(async move {
-                // Wrap the handle in our own future that we can await
-                let _ = handle.await;
-            });
+            for handle in handles {
+                join_set.spawn(async move {
+                    let _ = handle.await;
+                });
+            }
+
+            let _ = tokio::time::timeout(deadline, async {
+                while join_set.join_next().await.is_some() {}
+            })
+            .await;
         }
 
-        // Wait for all tasks with timeout
-        let _ = tokio::time::timeout(deadline, async {
-            while join_set.join_next().await.is_some() {}
-        })
-        .await;
+        // Update DB status and cancel active runs for all workers
+        let update = UpdateWorkerStatus {
+            status: WorkerStatus::Stopped,
+            error_message: None,
+            pid: None,
+        };
+        for worker_id in &worker_ids {
+            let _ = db::workers::update_status(&self.global_pool, worker_id, &update).await;
+            let _ = db::runs::cancel_by_worker(&self.global_pool, worker_id).await;
+        }
 
         Ok(())
     }
