@@ -1115,6 +1115,116 @@ async fn test_project_next_follows_task_next() {
 }
 
 // ============================================================================
+// Project dependency satisfaction via task completion (task.next cascade)
+// ============================================================================
+
+#[tokio::test]
+async fn test_task_next_emitted_when_project_dep_satisfied_via_auto_complete() {
+    let pool = setup_pool().await;
+
+    // Create two projects: Backend (dependency) and Frontend (depends on Backend)
+    let backend = create_project(&pool, "backend").await;
+    let frontend = create_project(&pool, "frontend").await;
+
+    // Frontend depends on Backend
+    db::project_dependencies::add(&pool, &frontend.id, &backend.id)
+        .await
+        .expect("add project dep");
+
+    // Create a task in Backend (the dependency project)
+    let backend_task = create_task(&pool, &backend.id, "setup API", "in_progress").await;
+
+    // Create a task in Frontend (should be blocked by project dep)
+    let frontend_task = create_task(&pool, &frontend.id, "build UI", "todo").await;
+
+    // Frontend task should NOT get a task.next event (project dep unmet)
+    let next_before: Vec<_> = events_of_type(&pool, "task.next")
+        .await
+        .into_iter()
+        .filter(|e| e.entity_id == frontend_task.id)
+        .collect();
+    assert!(
+        next_before.is_empty(),
+        "frontend task should not have task.next while backend has incomplete tasks"
+    );
+
+    // Complete the backend task → triggers auto-complete → backend status = 'completed'
+    // → should cascade task.next for frontend task
+    let mut backend_task = db::tasks::get(&pool, &backend_task.id)
+        .await
+        .expect("get")
+        .unwrap();
+    backend_task.status = "done".to_string();
+    backend_task.completed_at = Some(chrono::Utc::now().to_rfc3339());
+    db::tasks::update(&pool, &backend_task)
+        .await
+        .expect("complete backend task");
+
+    // Backend project should have auto-completed to 'completed'
+    let backend_proj = db::projects::get(&pool, &backend.id)
+        .await
+        .expect("get")
+        .unwrap();
+    assert_eq!(
+        backend_proj.status, "completed",
+        "backend project should auto-complete"
+    );
+
+    // Frontend task should NOW have a task.next event
+    let next_after: Vec<_> = events_of_type(&pool, "task.next")
+        .await
+        .into_iter()
+        .filter(|e| e.entity_id == frontend_task.id)
+        .collect();
+    assert!(
+        !next_after.is_empty(),
+        "frontend task should get task.next after project dependency is satisfied via auto-complete"
+    );
+}
+
+#[tokio::test]
+async fn test_task_next_not_emitted_when_partial_project_dep_satisfied() {
+    let pool = setup_pool().await;
+
+    // Project C depends on both A and B
+    let proj_a = create_project(&pool, "dep-a").await;
+    let proj_b = create_project(&pool, "dep-b").await;
+    let proj_c = create_project(&pool, "dependent-c").await;
+
+    db::project_dependencies::add(&pool, &proj_c.id, &proj_a.id)
+        .await
+        .expect("add dep a");
+    db::project_dependencies::add(&pool, &proj_c.id, &proj_b.id)
+        .await
+        .expect("add dep b");
+
+    // Tasks in each project
+    let task_a = create_task(&pool, &proj_a.id, "work in A", "in_progress").await;
+    let _task_b = create_task(&pool, &proj_b.id, "work in B", "in_progress").await;
+    let task_c = create_task(&pool, &proj_c.id, "work in C", "todo").await;
+
+    // Complete all tasks in A → A auto-completes, but B still has work
+    let mut task_a = db::tasks::get(&pool, &task_a.id)
+        .await
+        .expect("get")
+        .unwrap();
+    task_a.status = "done".to_string();
+    task_a.completed_at = Some(chrono::Utc::now().to_rfc3339());
+    db::tasks::update(&pool, &task_a).await.expect("complete a");
+
+    // C's task should NOT get task.next (B still has incomplete tasks)
+    let next_events: Vec<_> = events_of_type(&pool, "task.next")
+        .await
+        .into_iter()
+        .filter(|e| e.entity_id == task_c.id)
+        .collect();
+    assert!(
+        next_events.is_empty(),
+        "task in C should not get task.next when only one of two project deps is satisfied"
+    );
+}
+
+// ============================================================================
 // Project auto-complete trigger tests
 // ============================================================================
 
