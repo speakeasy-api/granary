@@ -36,8 +36,24 @@ impl Output for EntrypointOutput {
                 .to_string();
         }
 
-        let mut lines = vec!["Available granary workflows:".to_string()];
+        let mut lines = vec!["Available granary workflows:".to_string(), String::new()];
+        lines.push("Choose ONE entry point based on scope:".to_string());
+        lines.push(
+            "- Single project (one feature/fix): `granary plan \"Feature name\"`".to_string(),
+        );
+        lines.push(
+            "- Multiple projects (cross-cutting work): `granary initiate \"Initiative name\"`"
+                .to_string(),
+        );
+        lines.push(String::new());
+        lines.push("Other commands:".to_string());
         for hint in &self.hints {
+            // Skip plan and initiate since we listed them above with context
+            if hint.command.starts_with("granary plan")
+                || hint.command.starts_with("granary initiate")
+            {
+                continue;
+            }
             lines.push(format!("- {}: `{}`", hint.label, hint.command));
         }
         lines.join("\n")

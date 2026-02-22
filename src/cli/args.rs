@@ -8,11 +8,15 @@ use clap::{Parser, Subcommand, ValueEnum};
 #[command(author, version = crate::cli::update::version_with_update_notice(), about, long_about = None)]
 #[command(after_help = "\
 AGENTS (AI/LLM):
-  Plan a feature:
+  Choose ONE entry point based on scope:
+
+  Single project (one feature/fix):
     granary plan \"Feature name\"
 
-  Plan multi-project work:
+  Multiple projects (cross-cutting work):
     granary initiate \"Initiative name\"
+    NOTE: Do NOT use `granary plan` for multi-project work.
+    `initiate` coordinates projects and delegates task planning to sub-agents.
 
   Work on a task:
     granary work start <task-id>
