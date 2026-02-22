@@ -308,35 +308,43 @@ fn view_progress_section<'a>(stats: &TaskStats, palette: &'a Palette) -> Element
     let track_bg = palette.card;
     let fill_bg = palette.accent;
 
-    // Progress bar track with fill - ensure FillPortion is at least 1
+    // Progress bar track with fill - conditionally add fill/remaining so 0% and 100% render correctly
     let fill_portion = ((progress * 100.0) as u16).max(1);
-    let progress_bar = container(
-        container("")
-            .width(Length::FillPortion(fill_portion))
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: if progress > 0.0 {
-                    Some(Background::Color(fill_bg))
-                } else {
-                    None
-                },
-                border: Border {
-                    radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
+    let remaining_portion = (((1.0 - progress) * 100.0) as u16).max(1);
+    let mut bar_row = iced::widget::Row::new().height(Length::Fill);
+    if progress > 0.0 {
+        bar_row = bar_row.push(
+            container("")
+                .width(Length::FillPortion(fill_portion))
+                .height(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(Background::Color(fill_bg)),
+                    border: Border {
+                        radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
+                }),
+        );
+    }
+    if progress < 1.0 {
+        bar_row = bar_row.push(
+            container("")
+                .width(Length::FillPortion(remaining_portion))
+                .height(Length::Fill),
+        );
+    }
+    let progress_bar = container(bar_row)
+        .width(Length::Fill)
+        .height(Length::Fixed(6.0))
+        .style(move |_| container::Style {
+            background: Some(Background::Color(track_bg)),
+            border: Border {
+                radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
                 ..Default::default()
-            }),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(6.0))
-    .style(move |_| container::Style {
-        background: Some(Background::Color(track_bg)),
-        border: Border {
-            radius: Radius::from(appearance::CORNER_RADIUS_SMALL),
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    });
+        });
 
     // Stats text
     let stats_text = text(format!(
