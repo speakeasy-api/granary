@@ -61,7 +61,9 @@ struct WorkProjectJson<'a> {
 }
 
 /// Output for work done - simple status message
-pub struct WorkDoneOutput;
+pub struct WorkDoneOutput {
+    pub submitted_for_review: bool,
+}
 
 impl Output for WorkDoneOutput {
     fn output_type() -> OutputType {
@@ -69,15 +71,27 @@ impl Output for WorkDoneOutput {
     }
 
     fn to_json(&self) -> String {
-        r#"{"status": "done"}"#.to_string()
+        if self.submitted_for_review {
+            r#"{"status": "in_review"}"#.to_string()
+        } else {
+            r#"{"status": "done"}"#.to_string()
+        }
     }
 
     fn to_prompt(&self) -> String {
-        "Done.".to_string()
+        if self.submitted_for_review {
+            "Submitted for review.".to_string()
+        } else {
+            "Done.".to_string()
+        }
     }
 
     fn to_text(&self) -> String {
-        "Done.".to_string()
+        if self.submitted_for_review {
+            "Submitted for review.".to_string()
+        } else {
+            "Done.".to_string()
+        }
     }
 }
 
@@ -255,9 +269,11 @@ async fn work_done(
     })?;
 
     // Complete the task with a comment
-    services::complete_task(&pool, task_id, Some(summary)).await?;
+    let task = services::complete_task(&pool, task_id, Some(summary)).await?;
 
-    let output = WorkDoneOutput;
+    let output = WorkDoneOutput {
+        submitted_for_review: task.status == "in_review",
+    };
     println!("{}", output.format(cli_format));
     Ok(())
 }

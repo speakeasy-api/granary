@@ -12,6 +12,7 @@ pub mod initiate;
 pub mod initiatives;
 pub mod plan;
 pub mod projects;
+pub mod review;
 pub mod run;
 pub mod search;
 pub mod sessions;

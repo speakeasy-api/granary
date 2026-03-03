@@ -464,6 +464,33 @@ pub enum Commands {
         #[command(subcommand)]
         action: Option<ActionCommand>,
     },
+
+    /// Review a task or project that is in review
+    #[command(
+        after_help = "EXAMPLES:\n    granary review my-task-id                    # Show review context\n    granary review my-task-id approve             # Approve review\n    granary review my-task-id reject \"reason\"     # Reject with feedback"
+    )]
+    Review {
+        /// Task or project ID to review
+        id: String,
+
+        #[command(subcommand)]
+        action: Option<ReviewAction>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ReviewAction {
+    /// Approve the review and complete the entity
+    Approve {
+        /// Optional review comment
+        comment: Option<String>,
+    },
+
+    /// Reject the review and send work back
+    Reject {
+        /// Review feedback (required)
+        comment: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1050,6 +1077,12 @@ pub enum ConfigAction {
     Actions {
         #[command(subcommand)]
         action: Option<ActionsAction>,
+    },
+
+    /// Get or set review mode for the current workspace (task, project, or off)
+    ReviewMode {
+        /// Review mode to set: task, project, or off (omit to show current)
+        mode: Option<String>,
     },
 }
 

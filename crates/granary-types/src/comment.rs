@@ -15,6 +15,7 @@ pub enum CommentKind {
     Handoff,
     Incident,
     Context,
+    Review,
 }
 
 impl CommentKind {
@@ -27,6 +28,7 @@ impl CommentKind {
             CommentKind::Handoff => "handoff",
             CommentKind::Incident => "incident",
             CommentKind::Context => "context",
+            CommentKind::Review => "review",
         }
     }
 
@@ -39,6 +41,7 @@ impl CommentKind {
             CommentKind::Handoff,
             CommentKind::Incident,
             CommentKind::Context,
+            CommentKind::Review,
         ]
     }
 }
@@ -61,6 +64,7 @@ impl std::str::FromStr for CommentKind {
             "handoff" => Ok(CommentKind::Handoff),
             "incident" => Ok(CommentKind::Incident),
             "context" => Ok(CommentKind::Context),
+            "review" => Ok(CommentKind::Review),
             _ => Err(()),
         }
     }

@@ -88,6 +88,7 @@ impl<Message> canvas::Program<Message> for StatusIcon {
                 TaskStatus::Draft => (p.text_muted, IconType::Circle),
                 TaskStatus::Todo => (p.status_todo, IconType::Circle),
                 TaskStatus::InProgress => (p.status_progress, IconType::HalfCircle),
+                TaskStatus::InReview => (p.status_progress, IconType::HalfCircle),
                 TaskStatus::Done => (p.status_done, IconType::Checkmark),
                 TaskStatus::Blocked => (p.status_blocked, IconType::Blocked),
             };
@@ -166,6 +167,7 @@ pub fn status_icon_text<'a, Message: 'a>(
         TaskStatus::Draft => (Icon::Circle, palette.text_muted),
         TaskStatus::Todo => (Icon::Circle, palette.status_todo),
         TaskStatus::InProgress => (Icon::CircleDashed, palette.status_progress),
+        TaskStatus::InReview => (Icon::CircleDashed, palette.status_progress),
         TaskStatus::Done => (Icon::CircleCheck, palette.status_done),
         TaskStatus::Blocked => (Icon::Ban, palette.status_blocked),
     };

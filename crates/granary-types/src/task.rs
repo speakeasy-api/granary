@@ -115,6 +115,7 @@ pub enum TaskStatus {
     Draft,
     Todo,
     InProgress,
+    InReview,
     Done,
     Blocked,
 }
@@ -125,6 +126,7 @@ impl TaskStatus {
             TaskStatus::Draft => "draft",
             TaskStatus::Todo => "todo",
             TaskStatus::InProgress => "in_progress",
+            TaskStatus::InReview => "in_review",
             TaskStatus::Done => "done",
             TaskStatus::Blocked => "blocked",
         }
@@ -140,6 +142,10 @@ impl TaskStatus {
 
     pub fn is_in_progress(&self) -> bool {
         matches!(self, TaskStatus::InProgress)
+    }
+
+    pub fn is_in_review(&self) -> bool {
+        matches!(self, TaskStatus::InReview)
     }
 
     pub fn is_draft(&self) -> bool {
@@ -161,6 +167,7 @@ impl std::str::FromStr for TaskStatus {
             "draft" => Ok(TaskStatus::Draft),
             "todo" => Ok(TaskStatus::Todo),
             "in_progress" | "in-progress" | "inprogress" => Ok(TaskStatus::InProgress),
+            "in_review" | "in-review" | "inreview" => Ok(TaskStatus::InReview),
             "done" | "completed" => Ok(TaskStatus::Done),
             "blocked" => Ok(TaskStatus::Blocked),
             _ => Err(()),
