@@ -1,4 +1,4 @@
-version = "1.4.6"
+version = "1.5.0"
 
 [releases."1.2.1"]
 entries = ["patch-01khkj64ppmws0zfsp3jszp5dp.md"]
@@ -37,6 +37,10 @@ entries = [
 ]
 release_group = "rg-01kj3sy053a17nnhq71ftm51bn"
 
+[releases."1.5.0"]
+entries = ["minor-01kk44gh4hy49mssbgmpxvvh2p.md"]
+release_group = "rg-01kk45amd56wgapk71xcjt3j6n"
+
 [[release_groups]]
 id = "rg-01kj3sy053a17nnhq71ftm51bn"
 workspaces = ["root"]
@@ -46,3 +50,13 @@ root = "1.4.5"
 
 [release_groups.after]
 root = "1.4.6"
+
+[[release_groups]]
+id = "rg-01kk45amd56wgapk71xcjt3j6n"
+workspaces = ["root"]
+
+[release_groups.before]
+root = "1.4.6"
+
+[release_groups.after]
+root = "1.5.0"
