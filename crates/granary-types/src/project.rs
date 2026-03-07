@@ -9,6 +9,7 @@ use sqlx::FromRow;
 pub enum ProjectStatus {
     #[default]
     Active,
+    InReview,
     Completed,
     Archived,
 }
@@ -17,6 +18,7 @@ impl ProjectStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             ProjectStatus::Active => "active",
+            ProjectStatus::InReview => "in_review",
             ProjectStatus::Completed => "completed",
             ProjectStatus::Archived => "archived",
         }
@@ -24,6 +26,10 @@ impl ProjectStatus {
 
     pub fn is_active(&self) -> bool {
         matches!(self, ProjectStatus::Active)
+    }
+
+    pub fn is_in_review(&self) -> bool {
+        matches!(self, ProjectStatus::InReview)
     }
 
     pub fn is_completed(&self) -> bool {
@@ -43,6 +49,7 @@ impl std::str::FromStr for ProjectStatus {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "active" => Ok(ProjectStatus::Active),
+            "in_review" | "in-review" | "inreview" => Ok(ProjectStatus::InReview),
             "completed" => Ok(ProjectStatus::Completed),
             "archived" => Ok(ProjectStatus::Archived),
             _ => Err(()),

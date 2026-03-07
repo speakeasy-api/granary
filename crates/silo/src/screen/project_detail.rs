@@ -486,6 +486,7 @@ fn view_task_row<'a>(
     let (status_color, status_label): (Color, &'static str) = match status {
         TaskStatus::Done => (palette.status_done, "done"),
         TaskStatus::InProgress => (palette.status_progress, "in progress"),
+        TaskStatus::InReview => (palette.status_progress, "in review"),
         TaskStatus::Blocked => (palette.status_blocked, "blocked"),
         TaskStatus::Draft => (palette.text_muted, "draft"),
         TaskStatus::Todo => (palette.status_todo, "todo"),

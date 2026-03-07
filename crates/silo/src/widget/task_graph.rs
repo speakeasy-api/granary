@@ -170,6 +170,15 @@ impl TaskGraph {
                 palette.status_blocked,
             ),
             TaskStatus::Todo => (palette.card, palette.status_todo),
+            TaskStatus::InReview => (
+                Color::from_rgba(
+                    palette.status_progress.r,
+                    palette.status_progress.g,
+                    palette.status_progress.b,
+                    0.15,
+                ),
+                palette.status_progress,
+            ),
             TaskStatus::Draft => (palette.card, palette.text_muted),
         };
 

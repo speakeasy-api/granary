@@ -120,6 +120,7 @@ fn view_toolbar<'a>(state: &TasksScreenState<'a>, palette: &'a Palette) -> Eleme
         .map(|s| match s {
             TaskStatus::Todo => "Todo",
             TaskStatus::InProgress => "In Progress",
+            TaskStatus::InReview => "In Review",
             TaskStatus::Done => "Done",
             TaskStatus::Blocked => "Blocked",
             TaskStatus::Draft => "Draft",
@@ -403,6 +404,7 @@ fn view_task_card<'a>(
     let (status_color, status_label): (Color, &'static str) = match status {
         TaskStatus::Done => (palette.status_done, "done"),
         TaskStatus::InProgress => (palette.status_progress, "in progress"),
+        TaskStatus::InReview => (palette.status_progress, "in review"),
         TaskStatus::Blocked => (palette.status_blocked, "blocked"),
         TaskStatus::Draft => (palette.text_muted, "draft"),
         TaskStatus::Todo => (palette.status_todo, "todo"),

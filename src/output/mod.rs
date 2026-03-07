@@ -825,7 +825,9 @@ mod tests {
 
         #[test]
         fn work_done_output_json_valid() {
-            let output = WorkDoneOutput;
+            let output = WorkDoneOutput {
+                submitted_for_review: false,
+            };
             let json = output.to_json();
             let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed["status"], "done");
@@ -1089,7 +1091,9 @@ mod tests {
 
         #[test]
         fn format_table_override() {
-            let output = WorkDoneOutput;
+            let output = WorkDoneOutput {
+                submitted_for_review: false,
+            };
             let via_format = output.format(Some(CliOutputFormat::Table));
             let via_text = output.to_text();
             assert_eq!(via_format, via_text);
@@ -1097,7 +1101,9 @@ mod tests {
 
         #[test]
         fn format_md_falls_back_to_text() {
-            let output = WorkDoneOutput;
+            let output = WorkDoneOutput {
+                submitted_for_review: false,
+            };
             let via_format = output.format(Some(CliOutputFormat::Md));
             let via_text = output.to_text();
             assert_eq!(via_format, via_text);
@@ -1105,7 +1111,9 @@ mod tests {
 
         #[test]
         fn format_yaml_falls_back_to_text() {
-            let output = WorkDoneOutput;
+            let output = WorkDoneOutput {
+                submitted_for_review: false,
+            };
             let via_format = output.format(Some(CliOutputFormat::Yaml));
             let via_text = output.to_text();
             assert_eq!(via_format, via_text);

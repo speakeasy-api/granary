@@ -4,7 +4,8 @@ use std::process::ExitCode;
 use granary::cli::args::{Cli, Commands};
 use granary::cli::{
     actions, batch, checkpoints, config, daemon, entrypoint, events, init, initiate, initiatives,
-    plan, projects, run, search, sessions, show, summary, tasks, update, work, worker, workspace,
+    plan, projects, review, run, search, sessions, show, summary, tasks, update, work, worker,
+    workspace,
 };
 use granary::error::{GranaryError, exit_codes};
 
@@ -314,6 +315,10 @@ async fn run(cli: Cli) -> granary::Result<()> {
 
         Commands::Action { action } => {
             actions::action(action, format_override).await?;
+        }
+
+        Commands::Review { id, action } => {
+            review::review(&id, action, format_override).await?;
         }
     }
 

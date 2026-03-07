@@ -191,9 +191,67 @@ pub async fn config(action: ConfigAction, format: Option<CliOutputFormat>) -> Re
         ConfigAction::Actions { action } => {
             handle_actions_action(action, format).await?;
         }
+
+        ConfigAction::ReviewMode { mode } => {
+            let workspace = Workspace::find()?;
+            let pool = workspace.pool().await?;
+            match mode {
+                None => {
+                    // Show current review mode
+                    let current = db::config::get(&pool, "workflow.review_mode").await?;
+                    let output = ReviewModeOutput {
+                        mode: current.unwrap_or_else(|| "off".to_string()),
+                    };
+                    println!("{}", output.format(format));
+                }
+                Some(value) => match value.as_str() {
+                    "task" | "project" => {
+                        db::config::set(&pool, "workflow.review_mode", &value).await?;
+                        let output = ConfigSetOutput {
+                            key: "workflow.review_mode".to_string(),
+                            value,
+                        };
+                        println!("{}", output.format(format));
+                    }
+                    "off" | "disabled" => {
+                        db::config::delete(&pool, "workflow.review_mode").await?;
+                        let output = ReviewModeOutput {
+                            mode: "off".to_string(),
+                        };
+                        println!("{}", output.format(format));
+                    }
+                    other => {
+                        eprintln!(
+                            "Invalid review mode: '{}'. Valid values: task, project, off",
+                            other
+                        );
+                        std::process::exit(1);
+                    }
+                },
+            }
+        }
     }
 
     Ok(())
+}
+
+/// Output for `config review-mode` - current review mode
+pub struct ReviewModeOutput {
+    pub mode: String,
+}
+
+impl Output for ReviewModeOutput {
+    fn to_json(&self) -> String {
+        serde_json::json!({"review_mode": &self.mode}).to_string()
+    }
+
+    fn to_prompt(&self) -> String {
+        format!("Review mode: `{}`", self.mode)
+    }
+
+    fn to_text(&self) -> String {
+        format!("Review mode: {}", self.mode)
+    }
 }
 
 /// Output for `config runners` (list) - all configured runners

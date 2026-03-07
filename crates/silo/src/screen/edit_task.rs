@@ -168,6 +168,7 @@ fn view_form<'a>(state: &EditTaskScreenState<'a>, palette: &'a Palette) -> Eleme
         TaskStatus::Draft,
         TaskStatus::Todo,
         TaskStatus::InProgress,
+        TaskStatus::InReview,
         TaskStatus::Done,
         TaskStatus::Blocked,
     ];

@@ -1,9 +1,15 @@
-use granary_types::{CreateTask, Task, TaskStatus, UpdateTask};
+use granary_types::{CreateTask, Project, Task, TaskStatus, UpdateTask};
 use sqlx::SqlitePool;
 
 use crate::db::{self, counters};
 use crate::error::{GranaryError, Result};
 use crate::models::*;
+
+/// Read the workspace review mode from DB config.
+/// Returns Some("task") or Some("project"), or None if disabled.
+pub async fn get_review_mode(pool: &SqlitePool) -> Result<Option<String>> {
+    db::config::get(pool, "workflow.review_mode").await
+}
 
 /// Create a new task in a project
 pub async fn create_task(pool: &SqlitePool, input: CreateTask) -> Result<Task> {
@@ -182,6 +188,14 @@ pub async fn start_task(pool: &SqlitePool, id: &str, owner: Option<String>) -> R
         )));
     }
 
+    // Check if task is currently under review
+    if task.status_enum().is_in_review() {
+        return Err(GranaryError::Conflict(format!(
+            "Task {} is in review. Use 'granary review {} reject \"feedback\"' before restarting it.",
+            id, id
+        )));
+    }
+
     // Check if task is already terminal
     if task.status_enum().is_terminal() {
         return Err(GranaryError::Conflict(format!(
@@ -214,11 +228,17 @@ pub async fn start_task(pool: &SqlitePool, id: &str, owner: Option<String>) -> R
 }
 
 /// Complete a task
+/// If review_mode is "task", transitions to in_review instead of done.
 pub async fn complete_task(pool: &SqlitePool, id: &str, comment: Option<&str>) -> Result<Task> {
     let mut task = get_task(pool, id).await?;
 
-    task.status = TaskStatus::Done.as_str().to_string();
-    task.completed_at = Some(chrono::Utc::now().to_rfc3339());
+    let review_mode = get_review_mode(pool).await?;
+    if review_mode.as_deref() == Some("task") {
+        task.status = TaskStatus::InReview.as_str().to_string();
+    } else {
+        task.status = TaskStatus::Done.as_str().to_string();
+        task.completed_at = Some(chrono::Utc::now().to_rfc3339());
+    }
     task.blocked_reason = None;
     // Set actor for trigger-based events
     task.last_edited_by = task.owner.clone();
@@ -452,4 +472,244 @@ pub async fn get_tasks_with_deps(
         result.push((task, blocked_by));
     }
     Ok(result)
+}
+
+/// Approve a task review (in_review -> done)
+pub async fn approve_task(pool: &SqlitePool, id: &str, comment: Option<&str>) -> Result<Task> {
+    let mut task = get_task(pool, id).await?;
+
+    if !task.status_enum().is_in_review() {
+        return Err(GranaryError::Conflict(format!(
+            "Task {} is not in review (current status: {})",
+            id, task.status
+        )));
+    }
+
+    task.status = TaskStatus::Done.as_str().to_string();
+    task.completed_at = Some(chrono::Utc::now().to_rfc3339());
+    task.last_edited_by = task.owner.clone();
+
+    db::tasks::update(pool, &task).await?;
+
+    create_review_comment(pool, "task", id, "approved", comment, task.owner.as_deref()).await?;
+
+    get_task(pool, id).await
+}
+
+/// Reject a task review (in_review -> todo, clear claim)
+pub async fn reject_task(pool: &SqlitePool, id: &str, comment: &str) -> Result<Task> {
+    let mut task = get_task(pool, id).await?;
+
+    if !task.status_enum().is_in_review() {
+        return Err(GranaryError::Conflict(format!(
+            "Task {} is not in review (current status: {})",
+            id, task.status
+        )));
+    }
+
+    task.status = TaskStatus::Todo.as_str().to_string();
+    task.blocked_reason = None;
+    task.claim_owner = None;
+    task.claim_claimed_at = None;
+    task.claim_lease_expires_at = None;
+    task.last_edited_by = task.owner.clone();
+
+    db::tasks::update(pool, &task).await?;
+
+    create_review_comment(
+        pool,
+        "task",
+        id,
+        "rejected",
+        Some(comment),
+        task.owner.as_deref(),
+    )
+    .await?;
+
+    get_task(pool, id).await
+}
+
+/// Approve a project review (in_review -> completed)
+pub async fn approve_project(
+    pool: &SqlitePool,
+    id: &str,
+    comment: Option<&str>,
+) -> Result<Project> {
+    let mut project = crate::services::get_project(pool, id).await?;
+
+    if !project.status_enum().is_in_review() {
+        return Err(GranaryError::Conflict(format!(
+            "Project {} is not in review (current status: {})",
+            id, project.status
+        )));
+    }
+
+    project.status = ProjectStatus::Completed.as_str().to_string();
+    project.last_edited_by = project.owner.clone();
+
+    db::projects::update(pool, &project).await?;
+
+    create_review_comment(
+        pool,
+        "project",
+        id,
+        "approved",
+        comment,
+        project.owner.as_deref(),
+    )
+    .await?;
+
+    crate::services::get_project(pool, id).await
+}
+
+/// Reject a project review (in_review -> active, draft tasks -> todo)
+/// Must be called in a single transaction to ensure correct ordering.
+pub async fn reject_project(pool: &SqlitePool, id: &str, comment: &str) -> Result<Project> {
+    let project = crate::services::get_project(pool, id).await?;
+
+    if !project.status_enum().is_in_review() {
+        return Err(GranaryError::Conflict(format!(
+            "Project {} is not in review (current status: {})",
+            id, project.status
+        )));
+    }
+
+    let mut tx = pool.begin().await?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // 1. Transition project in_review -> active
+    let updated = sqlx::query(
+        r#"
+        UPDATE projects
+        SET status = ?, updated_at = ?, version = version + 1, last_edited_by = ?
+        WHERE id = ? AND version = ?
+        "#,
+    )
+    .bind(ProjectStatus::Active.as_str())
+    .bind(&now)
+    .bind(&project.owner)
+    .bind(id)
+    .bind(project.version)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(GranaryError::VersionMismatch {
+            expected: project.version,
+            found: project.version + 1,
+        });
+    }
+
+    // 2. Transition draft tasks -> todo (so task.next triggers fire while project is active)
+    sqlx::query(
+        r#"
+        UPDATE tasks
+        SET status = ?, updated_at = ?, version = version + 1, last_edited_by = ?
+        WHERE project_id = ? AND status = ?
+        "#,
+    )
+    .bind(TaskStatus::Todo.as_str())
+    .bind(&now)
+    .bind(&project.owner)
+    .bind(id)
+    .bind(TaskStatus::Draft.as_str())
+    .execute(&mut *tx)
+    .await?;
+
+    // 3. Add review comment
+    create_review_comment_in_tx(
+        &mut tx,
+        "project",
+        id,
+        "rejected",
+        Some(comment),
+        project.owner.as_deref(),
+    )
+    .await?;
+
+    tx.commit().await?;
+
+    crate::services::get_project(pool, id).await
+}
+
+/// Create a review comment with structured verdict metadata
+async fn create_review_comment(
+    pool: &SqlitePool,
+    parent_type: &str,
+    parent_id: &str,
+    verdict: &str,
+    content: Option<&str>,
+    author: Option<&str>,
+) -> Result<()> {
+    let scope = format!("{}:{}:comment", parent_type, parent_id);
+    let comment_number = counters::next(pool, &scope).await?;
+    let comment_id = generate_comment_id(parent_id, comment_number);
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let meta = serde_json::json!({ "verdict": verdict });
+
+    let comment = Comment {
+        id: comment_id,
+        parent_type: parent_type.to_string(),
+        parent_id: parent_id.to_string(),
+        comment_number,
+        kind: CommentKind::Review.as_str().to_string(),
+        content: content.unwrap_or("").to_string(),
+        author: author.map(|s| s.to_string()),
+        meta: Some(meta.to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+    };
+    db::comments::create(pool, &comment).await?;
+
+    Ok(())
+}
+
+/// Create a review comment within an existing SQL transaction.
+async fn create_review_comment_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    parent_type: &str,
+    parent_id: &str,
+    verdict: &str,
+    content: Option<&str>,
+    author: Option<&str>,
+) -> Result<()> {
+    let scope = format!("{}:{}:comment", parent_type, parent_id);
+    let comment_number = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO counters (scope, value) VALUES (?, 1)
+        ON CONFLICT(scope) DO UPDATE SET value = value + 1
+        RETURNING value
+        "#,
+    )
+    .bind(&scope)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let comment_id = generate_comment_id(parent_id, comment_number);
+    let now = chrono::Utc::now().to_rfc3339();
+    let meta = serde_json::json!({ "verdict": verdict });
+
+    sqlx::query(
+        r#"
+        INSERT INTO comments (id, parent_type, parent_id, comment_number, kind, content,
+            author, meta, created_at, updated_at, version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&comment_id)
+    .bind(parent_type)
+    .bind(parent_id)
+    .bind(comment_number)
+    .bind(CommentKind::Review.as_str())
+    .bind(content.unwrap_or(""))
+    .bind(author)
+    .bind(meta.to_string())
+    .bind(&now)
+    .bind(&now)
+    .bind(1_i64)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
 }

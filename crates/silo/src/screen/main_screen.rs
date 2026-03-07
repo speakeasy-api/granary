@@ -737,6 +737,9 @@ fn view_task_row<'a>(
                     palette,
                 ));
             }
+            TaskStatus::InReview => {
+                // In review - no quick actions from GUI
+            }
             TaskStatus::Blocked => {
                 action_btns.push(widget::action_button(
                     "Unblock",
@@ -790,6 +793,10 @@ fn view_task_row<'a>(
             TaskStatus::InProgress => {
                 widget::action_button("Done", Message::CompleteTask(task_id.clone()), palette)
             }
+            TaskStatus::InReview => text("in review")
+                .size(11)
+                .color(palette.status_progress)
+                .into(),
             TaskStatus::Done => {
                 widget::action_button("Re-open", Message::ReopenTask(task_id.clone()), palette)
             }
