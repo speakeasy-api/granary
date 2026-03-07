@@ -8,7 +8,7 @@ use crate::models::*;
 /// Read the workspace review mode from DB config.
 /// Returns Some("task") or Some("project"), or None if disabled.
 pub async fn get_review_mode(pool: &SqlitePool) -> Result<Option<String>> {
-    Ok(db::config::get(pool, "workflow.review_mode").await?)
+    db::config::get(pool, "workflow.review_mode").await
 }
 
 /// Create a new task in a project

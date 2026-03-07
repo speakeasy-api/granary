@@ -304,9 +304,7 @@ fn format_project_review_context(
         "granary review {} approve                # approve and complete project\n",
         project.id
     ));
-    out.push_str(&format!(
-        "# To reject: create follow-up tasks first, then reject:\n"
-    ));
+    out.push_str("# To reject: create follow-up tasks first, then reject:\n");
     out.push_str(&format!(
         "granary project {} tasks create \"Fix: <issue>\"\n",
         project.id
