@@ -1,15 +1,19 @@
-After implementation is complete, use `cargo fmt` to format files.
+# Agent Instructions
+
+## Formatting
+
+After implementation is complete, use `cargo fmt` to format files. Always run `cargo clippy` before committing to ensure there are no warnings or errors.
+
+## SQL Migrations
+
+- Always create migrations via SQLx CLI from the repo root:
+  - `sqlx migrate add <name>`
+- Do not hand-write timestamp/version prefixes in migration filenames.
+- If you hit a duplicate migration version error, regenerate one migration with `sqlx migrate add <name>` and move the SQL into the newly generated file.
+
+## Build Guard
+
+- This repo has a build-time check in `build.rs` that fails compilation when two migration files share the same numeric version prefix.
+- Treat that failure as a naming/version collision and regenerate one of the conflicting migrations.
 
 IMPORTANT: when user requests to "use granary", run `granary` command before performing any other task.
-
-## Iced GUI Development
-
-The `crates/silo/` crate uses the Iced GUI library. When working on files in this crate, the `.claude/skills/iced-development.md` skill is automatically applied. It contains best practices for:
-
-- Application architecture (Elm Architecture / MVU)
-- Message enum patterns
-- State management
-- Styling and theming
-- Component composition
-- Async operations with Tasks
-- Subscriptions for background events

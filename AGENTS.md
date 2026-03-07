@@ -1,5 +1,9 @@
 # Agent Instructions
 
+## Formatting
+
+After implementation is complete, use `cargo fmt` to format files. Always run `cargo clippy` before committing to ensure there are no warnings or errors.
+
 ## SQL Migrations
 
 - Always create migrations via SQLx CLI from the repo root:
