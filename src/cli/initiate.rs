@@ -62,6 +62,7 @@ pub async fn initiate(
             description: description.clone(),
             owner: None,
             tags: vec![],
+            metadata: None,
         },
     )
     .await?;

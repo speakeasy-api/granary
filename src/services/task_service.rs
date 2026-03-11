@@ -29,6 +29,11 @@ pub async fn create_task(pool: &SqlitePool, input: CreateTask) -> Result<Task> {
         Some(serde_json::to_string(&input.tags)?)
     };
 
+    let metadata = input
+        .metadata
+        .map(|m| serde_json::to_string(&m))
+        .transpose()?;
+
     let task = Task {
         id: id.clone(),
         project_id: input.project_id,
@@ -55,6 +60,7 @@ pub async fn create_task(pool: &SqlitePool, input: CreateTask) -> Result<Task> {
         updated_at: now,
         version: 1,
         last_edited_by: input.owner,
+        metadata,
     };
 
     db::tasks::create(pool, &task).await?;
@@ -133,6 +139,9 @@ pub async fn update_task(pool: &SqlitePool, id: &str, updates: UpdateTask) -> Re
     }
     if let Some(weight) = updates.focus_weight {
         task.focus_weight = weight;
+    }
+    if let Some(metadata) = updates.metadata {
+        task.metadata = Some(serde_json::to_string(&metadata)?);
     }
 
     // Set actor for trigger-based events

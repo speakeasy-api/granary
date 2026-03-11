@@ -751,6 +751,7 @@ mod tests {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             version: 1,
             last_edited_by: None,
+            metadata: None,
         }
     }
 
@@ -810,5 +811,52 @@ mod tests {
         // And it should be between the task tags
         assert!(output.starts_with("<task>"));
         assert!(output.ends_with("</task>\n"));
+    }
+
+    #[test]
+    fn test_format_task_prompt_excludes_metadata() {
+        let mut task = create_test_task();
+        task.metadata = Some(r#"{"env":"production","retries":3}"#.to_string());
+        let output = format_task(&task);
+
+        assert!(!output.contains("metadata"));
+        assert!(!output.contains("production"));
+        assert!(!output.contains("retries"));
+    }
+
+    #[test]
+    fn test_format_task_with_deps_prompt_excludes_metadata() {
+        let mut task = create_test_task();
+        task.metadata = Some(r#"{"key":"value"}"#.to_string());
+        let blocked_by = vec!["dep-1".to_string()];
+        let output = format_task_with_deps(&task, &blocked_by);
+
+        assert!(!output.contains("metadata"));
+        assert!(output.contains("blocked_by: dep-1"));
+    }
+
+    #[test]
+    fn test_format_project_prompt_excludes_metadata() {
+        let project = Project {
+            id: "proj-1".to_string(),
+            slug: "proj-1".to_string(),
+            name: "Test Project".to_string(),
+            description: None,
+            owner: None,
+            status: "active".to_string(),
+            tags: None,
+            default_session_policy: None,
+            steering_refs: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            version: 1,
+            last_edited_by: None,
+            metadata: Some(r#"{"team":"backend"}"#.to_string()),
+        };
+        let output = format_project(&project);
+
+        assert!(output.contains("id: proj-1"));
+        assert!(!output.contains("metadata"));
+        assert!(!output.contains("backend"));
     }
 }

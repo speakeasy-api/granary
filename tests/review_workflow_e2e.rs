@@ -28,6 +28,7 @@ async fn create_project(pool: &sqlx::SqlitePool, name: &str, status: &str) -> Pr
         steering_refs: None,
         created_at: now.clone(),
         updated_at: now,
+        metadata: None,
         version: 1,
         last_edited_by: Some("reviewer".to_string()),
     };
@@ -64,6 +65,7 @@ async fn create_task(pool: &sqlx::SqlitePool, project_id: &str, title: &str, sta
         claim_lease_expires_at: None,
         pinned: 0,
         focus_weight: 0,
+        metadata: None,
         created_at: now.clone(),
         updated_at: now,
         version: 1,
