@@ -205,10 +205,20 @@ pub async fn task(
             owner,
             tags,
             due,
+            metadata,
         }) => {
             let status = status.as_ref().and_then(|s| s.parse().ok());
             let priority = priority.as_ref().and_then(|p| p.parse().ok());
             let tags = tags.map(|t| t.split(',').map(|s| s.trim().to_string()).collect());
+            let metadata = metadata
+                .map(|m| serde_json::from_str(&m))
+                .transpose()
+                .map_err(|e| {
+                    crate::error::GranaryError::InvalidArgument(format!(
+                        "Invalid metadata JSON: {}",
+                        e
+                    ))
+                })?;
 
             let task = services::update_task(
                 &pool,
@@ -221,6 +231,7 @@ pub async fn task(
                     owner,
                     tags,
                     due_at: due,
+                    metadata,
                     ..Default::default()
                 },
             )

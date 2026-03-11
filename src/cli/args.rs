@@ -577,6 +577,10 @@ pub enum ProjectAction {
         /// Tags (comma-separated)
         #[arg(long)]
         tags: Option<String>,
+
+        /// Metadata (JSON object)
+        #[arg(long)]
+        metadata: Option<String>,
     },
     /// Update project
     #[command(visible_aliases = ["edit", "modify"])]
@@ -596,6 +600,10 @@ pub enum ProjectAction {
         /// Tags to add (+tag) or remove (-tag)
         #[arg(long)]
         tags: Option<String>,
+
+        /// Metadata (JSON object)
+        #[arg(long)]
+        metadata: Option<String>,
     },
 
     /// Mark project as done (completed)
@@ -731,6 +739,10 @@ pub enum ProjectTasksAction {
         /// Due date (ISO 8601)
         #[arg(long)]
         due: Option<String>,
+
+        /// Metadata (JSON object)
+        #[arg(long)]
+        metadata: Option<String>,
     },
 }
 
@@ -766,6 +778,10 @@ pub enum TaskAction {
         /// Due date
         #[arg(long)]
         due: Option<String>,
+
+        /// Metadata (JSON object)
+        #[arg(long)]
+        metadata: Option<String>,
     },
 
     /// Mark a draft task as ready (transition Draft -> Todo)
@@ -1299,6 +1315,10 @@ pub enum InitiativeAction {
         /// Tags (comma-separated)
         #[arg(long)]
         tags: Option<String>,
+
+        /// Metadata (JSON object)
+        #[arg(long)]
+        metadata: Option<String>,
     },
 
     /// Update initiative
@@ -1319,6 +1339,10 @@ pub enum InitiativeAction {
         /// Tags (comma-separated)
         #[arg(long)]
         tags: Option<String>,
+
+        /// Metadata (JSON object)
+        #[arg(long)]
+        metadata: Option<String>,
     },
 
     /// Archive initiative

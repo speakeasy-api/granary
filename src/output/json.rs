@@ -316,6 +316,7 @@ mod tests {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             version: 1,
             last_edited_by: None,
+            metadata: None,
         }
     }
 
@@ -419,5 +420,80 @@ mod tests {
         assert_eq!(parsed["priority"].as_str().unwrap(), "P1");
         assert_eq!(parsed["project_id"].as_str().unwrap(), "test-proj");
         assert_eq!(parsed["owner"].as_str().unwrap(), "test-user");
+    }
+
+    #[test]
+    fn test_task_json_metadata_null_when_absent() {
+        let task = create_test_task();
+        let output = format_task(&task);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert!(parsed.get("metadata").is_some());
+        assert!(parsed["metadata"].is_null());
+    }
+
+    #[test]
+    fn test_task_json_metadata_present_as_string() {
+        let mut task = create_test_task();
+        task.metadata = Some(r#"{"env":"production","retries":3}"#.to_string());
+        let output = format_task(&task);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(
+            parsed["metadata"].as_str().unwrap(),
+            r#"{"env":"production","retries":3}"#
+        );
+    }
+
+    #[test]
+    fn test_project_json_metadata_null_when_absent() {
+        let project = Project {
+            id: "proj-1".to_string(),
+            slug: "proj-1".to_string(),
+            name: "Test Project".to_string(),
+            description: None,
+            owner: None,
+            status: "active".to_string(),
+            tags: None,
+            default_session_policy: None,
+            steering_refs: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            version: 1,
+            last_edited_by: None,
+            metadata: None,
+        };
+        let output = format_project(&project);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert!(parsed.get("metadata").is_some());
+        assert!(parsed["metadata"].is_null());
+    }
+
+    #[test]
+    fn test_project_json_metadata_present() {
+        let project = Project {
+            id: "proj-1".to_string(),
+            slug: "proj-1".to_string(),
+            name: "Test Project".to_string(),
+            description: None,
+            owner: None,
+            status: "active".to_string(),
+            tags: None,
+            default_session_policy: None,
+            steering_refs: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            version: 1,
+            last_edited_by: None,
+            metadata: Some(r#"{"team":"backend"}"#.to_string()),
+        };
+        let output = format_project(&project);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(
+            parsed["metadata"].as_str().unwrap(),
+            r#"{"team":"backend"}"#
+        );
     }
 }

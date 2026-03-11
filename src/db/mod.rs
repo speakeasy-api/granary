@@ -15,8 +15,8 @@ pub mod projects {
         sqlx::query(
             r#"
             INSERT INTO projects (id, slug, name, description, owner, status, tags,
-                default_session_policy, steering_refs, created_at, updated_at, version, last_edited_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                default_session_policy, steering_refs, created_at, updated_at, version, last_edited_by, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&project.id)
@@ -32,6 +32,7 @@ pub mod projects {
         .bind(&project.updated_at)
         .bind(project.version)
         .bind(&project.last_edited_by)
+        .bind(&project.metadata)
         .execute(pool)
         .await?;
         Ok(())
@@ -66,7 +67,7 @@ pub mod projects {
             UPDATE projects
             SET name = ?, description = ?, owner = ?, status = ?, tags = ?,
                 default_session_policy = ?, steering_refs = ?, updated_at = ?, version = version + 1,
-                last_edited_by = ?
+                last_edited_by = ?, metadata = ?
             WHERE id = ? AND version = ?
             "#,
         )
@@ -79,6 +80,7 @@ pub mod projects {
         .bind(&project.steering_refs)
         .bind(chrono::Utc::now().to_rfc3339())
         .bind(&project.last_edited_by)
+        .bind(&project.metadata)
         .bind(&project.id)
         .bind(project.version)
         .execute(pool)
@@ -151,11 +153,16 @@ pub mod initiatives {
         } else {
             Some(serde_json::to_string(&input.tags)?)
         };
+        let metadata_json = input
+            .metadata
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
 
         sqlx::query(
             r#"
-            INSERT INTO initiatives (id, slug, name, description, owner, status, tags, created_at, updated_at, version)
-            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1)
+            INSERT INTO initiatives (id, slug, name, description, owner, status, tags, created_at, updated_at, version, metadata)
+            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1, ?)
             "#,
         )
         .bind(&id)
@@ -166,6 +173,7 @@ pub mod initiatives {
         .bind(&tags_json)
         .bind(&now)
         .bind(&now)
+        .bind(&metadata_json)
         .execute(pool)
         .await?;
 
@@ -238,12 +246,17 @@ pub mod initiatives {
             .as_ref()
             .map(|t| serde_json::to_string(t).ok())
             .unwrap_or(current.tags);
+        let metadata_json = update
+            .metadata
+            .as_ref()
+            .map(|m| serde_json::to_string(m).ok())
+            .unwrap_or(current.metadata);
 
         let result = sqlx::query(
             r#"
             UPDATE initiatives
             SET name = ?, description = ?, owner = ?, status = ?, tags = ?,
-                updated_at = ?, version = version + 1
+                updated_at = ?, version = version + 1, metadata = ?
             WHERE id = ? AND version = ?
             "#,
         )
@@ -253,6 +266,7 @@ pub mod initiatives {
         .bind(&status)
         .bind(&tags_json)
         .bind(&now)
+        .bind(&metadata_json)
         .bind(id)
         .bind(expected_version)
         .execute(pool)
@@ -389,8 +403,8 @@ pub mod tasks {
                 status, priority, owner, tags, worker_ids, run_ids, blocked_reason,
                 started_at, completed_at, due_at,
                 claim_owner, claim_claimed_at, claim_lease_expires_at, pinned, focus_weight,
-                created_at, updated_at, version, last_edited_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, version, last_edited_by, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&task.id)
@@ -418,6 +432,7 @@ pub mod tasks {
         .bind(&task.updated_at)
         .bind(task.version)
         .bind(&task.last_edited_by)
+        .bind(&task.metadata)
         .execute(pool)
         .await?;
         Ok(())
@@ -502,7 +517,7 @@ pub mod tasks {
                 blocked_reason = ?, started_at = ?, completed_at = ?, due_at = ?,
                 claim_owner = ?, claim_claimed_at = ?, claim_lease_expires_at = ?,
                 pinned = ?, focus_weight = ?, updated_at = ?, version = version + 1,
-                last_edited_by = ?
+                last_edited_by = ?, metadata = ?
             WHERE id = ? AND version = ?
             "#,
         )
@@ -525,6 +540,7 @@ pub mod tasks {
         .bind(task.focus_weight)
         .bind(chrono::Utc::now().to_rfc3339())
         .bind(&task.last_edited_by)
+        .bind(&task.metadata)
         .bind(&task.id)
         .bind(task.version)
         .execute(pool)

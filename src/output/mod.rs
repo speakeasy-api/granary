@@ -70,6 +70,7 @@ mod tests {
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             version: 1,
             last_edited_by: None,
+            metadata: None,
         }
     }
 
@@ -88,6 +89,7 @@ mod tests {
             updated_at: "2025-01-01T00:00:00Z".to_string(),
             version: 1,
             last_edited_by: None,
+            metadata: None,
         }
     }
 

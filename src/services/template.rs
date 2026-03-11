@@ -393,6 +393,55 @@ mod tests {
         assert_eq!(substitute("{enabled}", &event).unwrap(), "true");
     }
 
+    #[test]
+    fn test_substitute_metadata_nested_field() {
+        let payload = r#"{"id": "task-1", "metadata": {"env": "production", "retries": 3}}"#;
+        let event = create_test_event(payload);
+
+        assert_eq!(substitute("{metadata.env}", &event).unwrap(), "production");
+        assert_eq!(substitute("{metadata.retries}", &event).unwrap(), "3");
+    }
+
+    #[test]
+    fn test_substitute_metadata_deeply_nested() {
+        let payload = r#"{"metadata": {"config": {"timeout": 30, "debug": true}}}"#;
+        let event = create_test_event(payload);
+
+        assert_eq!(
+            substitute("{metadata.config.timeout}", &event).unwrap(),
+            "30"
+        );
+        assert_eq!(
+            substitute("{metadata.config.debug}", &event).unwrap(),
+            "true"
+        );
+    }
+
+    #[test]
+    fn test_substitute_metadata_missing_key_resolves_empty() {
+        let payload = r#"{"metadata": {"env": "staging"}}"#;
+        let event = create_test_event(payload);
+
+        assert_eq!(substitute("{metadata.nonexistent}", &event).unwrap(), "");
+    }
+
+    #[test]
+    fn test_substitute_metadata_null_resolves_empty() {
+        let payload = r#"{"metadata": null}"#;
+        let event = create_test_event(payload);
+
+        assert_eq!(substitute("{metadata.env}", &event).unwrap(), "");
+    }
+
+    #[test]
+    fn test_substitute_metadata_in_mixed_template() {
+        let payload = r#"{"id": "task-5", "metadata": {"branch": "feature/x"}}"#;
+        let event = create_test_event(payload);
+
+        let result = substitute("git checkout {metadata.branch} # for {id}", &event).unwrap();
+        assert_eq!(result, "git checkout feature/x # for task-5");
+    }
+
     // --- PipelineContext unit tests ---
 
     #[test]

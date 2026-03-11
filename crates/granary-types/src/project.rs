@@ -80,6 +80,8 @@ pub struct Project {
     pub version: i64,
     #[serde(default)]
     pub last_edited_by: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<String>,
 }
 
 impl Project {
@@ -92,6 +94,12 @@ impl Project {
             .as_ref()
             .and_then(|t| serde_json::from_str(t).ok())
             .unwrap_or_default()
+    }
+
+    pub fn metadata_value(&self) -> Option<serde_json::Value> {
+        self.metadata
+            .as_ref()
+            .and_then(|m| serde_json::from_str(m).ok())
     }
 
     pub fn steering_refs_vec(&self) -> Vec<String> {
@@ -110,6 +118,7 @@ pub struct CreateProject {
     pub tags: Vec<String>,
     pub default_session_policy: Option<serde_json::Value>,
     pub steering_refs: Vec<String>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Default)]
@@ -121,6 +130,7 @@ pub struct UpdateProject {
     pub tags: Option<Vec<String>>,
     pub default_session_policy: Option<serde_json::Value>,
     pub steering_refs: Option<Vec<String>>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Represents a dependency relationship between two projects
@@ -130,4 +140,62 @@ pub struct ProjectDependency {
     pub project_id: String,
     pub depends_on_project_id: String,
     pub created_at: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_project() -> Project {
+        Project {
+            id: "proj-1".to_string(),
+            slug: "proj-1".to_string(),
+            name: "Test".to_string(),
+            description: None,
+            owner: None,
+            status: "active".to_string(),
+            tags: None,
+            default_session_policy: None,
+            steering_refs: None,
+            metadata: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            version: 1,
+            last_edited_by: None,
+        }
+    }
+
+    #[test]
+    fn metadata_value_returns_none_when_absent() {
+        let project = make_project();
+        assert!(project.metadata_value().is_none());
+    }
+
+    #[test]
+    fn metadata_value_parses_valid_json() {
+        let mut project = make_project();
+        project.metadata = Some(r#"{"team":"platform"}"#.to_string());
+        let val = project.metadata_value().unwrap();
+        assert_eq!(val["team"], "platform");
+    }
+
+    #[test]
+    fn metadata_value_returns_none_for_invalid_json() {
+        let mut project = make_project();
+        project.metadata = Some("broken".to_string());
+        assert!(project.metadata_value().is_none());
+    }
+
+    #[test]
+    fn metadata_deserialized_with_default_when_missing() {
+        let json = r#"{
+            "id": "p1", "slug": "p1", "name": "Test",
+            "status": "active",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "version": 1
+        }"#;
+        let project: Project = serde_json::from_str(json).unwrap();
+        assert!(project.metadata.is_none());
+    }
 }

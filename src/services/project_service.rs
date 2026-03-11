@@ -28,6 +28,11 @@ pub async fn create_project(pool: &SqlitePool, input: CreateProject) -> Result<P
         .map(|p| serde_json::to_string(&p))
         .transpose()?;
 
+    let metadata = input
+        .metadata
+        .map(|m| serde_json::to_string(&m))
+        .transpose()?;
+
     let project = Project {
         id: id.clone(),
         slug,
@@ -42,6 +47,7 @@ pub async fn create_project(pool: &SqlitePool, input: CreateProject) -> Result<P
         updated_at: now,
         version: 1,
         last_edited_by: None,
+        metadata,
     };
 
     db::projects::create(pool, &project).await?;
@@ -89,6 +95,9 @@ pub async fn update_project(
     }
     if let Some(refs) = updates.steering_refs {
         project.steering_refs = Some(serde_json::to_string(&refs)?);
+    }
+    if let Some(metadata) = updates.metadata {
+        project.metadata = Some(serde_json::to_string(&metadata)?);
     }
 
     // Set actor for trigger-based events (no actor available at this level)

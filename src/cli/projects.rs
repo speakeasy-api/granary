@@ -114,13 +114,22 @@ pub async fn project_action_without_id(
             description,
             owner,
             tags,
+            metadata,
         } => {
             let resolved_name = name.or(name_flag).ok_or_else(|| {
                 crate::error::GranaryError::InvalidArgument(
                     "Project name is required. Usage: granary project create <name>".to_string(),
                 )
             })?;
-            create_project(&resolved_name, description, owner, tags, cli_format).await
+            create_project(
+                &resolved_name,
+                description,
+                owner,
+                tags,
+                metadata,
+                cli_format,
+            )
+            .await
         }
         _ => Err(crate::error::GranaryError::InvalidArgument(
             "Project ID is required for this action".to_string(),
@@ -163,8 +172,18 @@ pub async fn project(
             description,
             owner,
             tags,
+            metadata,
         }) => {
             let parsed_tags = tags.map(|t| parse_tags(&t));
+            let metadata = metadata
+                .map(|m| serde_json::from_str(&m))
+                .transpose()
+                .map_err(|e| {
+                    crate::error::GranaryError::InvalidArgument(format!(
+                        "Invalid metadata JSON: {}",
+                        e
+                    ))
+                })?;
 
             let project = services::update_project(
                 &pool,
@@ -174,6 +193,7 @@ pub async fn project(
                     description,
                     owner,
                     tags: parsed_tags,
+                    metadata,
                     ..Default::default()
                 },
             )
@@ -223,6 +243,7 @@ pub async fn project(
                     dependencies,
                     tags,
                     due,
+                    metadata,
                 }) => {
                     let title = title_positional.or(title_flag).ok_or_else(|| {
                         crate::error::GranaryError::InvalidArgument(
@@ -235,6 +256,16 @@ pub async fn project(
                         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                         .unwrap_or_default();
 
+                    let metadata: Option<serde_json::Value> = metadata
+                        .map(|m| serde_json::from_str(&m))
+                        .transpose()
+                        .map_err(|e| {
+                            crate::error::GranaryError::InvalidArgument(format!(
+                                "Invalid metadata JSON: {}",
+                                e
+                            ))
+                        })?;
+
                     let task = services::create_task(
                         &pool,
                         CreateTask {
@@ -246,6 +277,7 @@ pub async fn project(
                             owner,
                             tags,
                             due_at: due,
+                            metadata,
                             ..Default::default()
                         },
                     )
@@ -436,6 +468,7 @@ pub async fn create_project(
     description: Option<String>,
     owner: Option<String>,
     tags: Option<String>,
+    metadata: Option<String>,
     cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
@@ -445,6 +478,13 @@ pub async fn create_project(
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
 
+    let metadata: Option<serde_json::Value> = metadata
+        .map(|m| serde_json::from_str(&m))
+        .transpose()
+        .map_err(|e| {
+            crate::error::GranaryError::InvalidArgument(format!("Invalid metadata JSON: {}", e))
+        })?;
+
     let project = services::create_project(
         &pool,
         CreateProject {
@@ -452,6 +492,7 @@ pub async fn create_project(
             description,
             owner,
             tags,
+            metadata,
             ..Default::default()
         },
     )

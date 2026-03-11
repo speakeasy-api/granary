@@ -56,11 +56,19 @@ pub struct Initiative {
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
+    #[serde(default)]
+    pub metadata: Option<String>,
 }
 
 impl Initiative {
     pub fn status_enum(&self) -> InitiativeStatus {
         self.status.parse().unwrap_or_default()
+    }
+
+    pub fn metadata_value(&self) -> Option<serde_json::Value> {
+        self.metadata
+            .as_ref()
+            .and_then(|m| serde_json::from_str(m).ok())
     }
 
     pub fn tags_vec(&self) -> Vec<String> {
@@ -78,6 +86,7 @@ pub struct CreateInitiative {
     pub description: Option<String>,
     pub owner: Option<String>,
     pub tags: Vec<String>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Input for updating an existing initiative.
@@ -88,6 +97,7 @@ pub struct UpdateInitiative {
     pub owner: Option<String>,
     pub status: Option<InitiativeStatus>,
     pub tags: Option<Vec<String>>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Junction table model for initiative-project many-to-many relationship.
@@ -161,4 +171,60 @@ pub struct NextAction {
     pub project_id: String,
     pub project_name: String,
     pub priority: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_initiative() -> Initiative {
+        Initiative {
+            id: "init-1".to_string(),
+            slug: "init-1".to_string(),
+            name: "Test".to_string(),
+            description: None,
+            owner: None,
+            status: "active".to_string(),
+            tags: None,
+            metadata: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            version: 1,
+        }
+    }
+
+    #[test]
+    fn metadata_value_returns_none_when_absent() {
+        let init = make_initiative();
+        assert!(init.metadata_value().is_none());
+    }
+
+    #[test]
+    fn metadata_value_parses_valid_json() {
+        let mut init = make_initiative();
+        init.metadata = Some(r#"{"quarter":"Q1","budget":50000}"#.to_string());
+        let val = init.metadata_value().unwrap();
+        assert_eq!(val["quarter"], "Q1");
+        assert_eq!(val["budget"], 50000);
+    }
+
+    #[test]
+    fn metadata_value_returns_none_for_invalid_json() {
+        let mut init = make_initiative();
+        init.metadata = Some("not json".to_string());
+        assert!(init.metadata_value().is_none());
+    }
+
+    #[test]
+    fn metadata_deserialized_with_default_when_missing() {
+        let json = r#"{
+            "id": "i1", "slug": "i1", "name": "Test",
+            "status": "active",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "version": 1
+        }"#;
+        let init: Initiative = serde_json::from_str(json).unwrap();
+        assert!(init.metadata.is_none());
+    }
 }

@@ -48,6 +48,8 @@ pub struct Task {
     pub version: i64,
     #[serde(default)]
     pub last_edited_by: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<String>,
 }
 
 impl Task {
@@ -71,6 +73,12 @@ impl Task {
             .as_ref()
             .and_then(|t| serde_json::from_str(t).ok())
             .unwrap_or_default()
+    }
+
+    pub fn metadata_value(&self) -> Option<serde_json::Value> {
+        self.metadata
+            .as_ref()
+            .and_then(|m| serde_json::from_str(m).ok())
     }
 
     pub fn run_ids_vec(&self) -> Vec<String> {
@@ -255,6 +263,7 @@ pub struct CreateTask {
     pub owner: Option<String>,
     pub tags: Vec<String>,
     pub due_at: Option<String>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Default)]
@@ -271,4 +280,106 @@ pub struct UpdateTask {
     pub due_at: Option<String>,
     pub pinned: Option<bool>,
     pub focus_weight: Option<i64>,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_task() -> Task {
+        Task {
+            id: "test-task-1".to_string(),
+            project_id: "proj-1".to_string(),
+            task_number: 1,
+            parent_task_id: None,
+            title: "Test".to_string(),
+            description: None,
+            status: "todo".to_string(),
+            priority: "P2".to_string(),
+            owner: None,
+            tags: None,
+            worker_ids: None,
+            run_ids: None,
+            blocked_reason: None,
+            started_at: None,
+            completed_at: None,
+            due_at: None,
+            claim_owner: None,
+            claim_claimed_at: None,
+            claim_lease_expires_at: None,
+            pinned: 0,
+            focus_weight: 0,
+            metadata: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            version: 1,
+            last_edited_by: None,
+        }
+    }
+
+    #[test]
+    fn metadata_value_returns_none_when_absent() {
+        let task = make_task();
+        assert!(task.metadata_value().is_none());
+    }
+
+    #[test]
+    fn metadata_value_parses_valid_json() {
+        let mut task = make_task();
+        task.metadata = Some(r#"{"env":"production","retries":3}"#.to_string());
+        let val = task.metadata_value().unwrap();
+        assert_eq!(val["env"], "production");
+        assert_eq!(val["retries"], 3);
+    }
+
+    #[test]
+    fn metadata_value_returns_none_for_invalid_json() {
+        let mut task = make_task();
+        task.metadata = Some("not valid json".to_string());
+        assert!(task.metadata_value().is_none());
+    }
+
+    #[test]
+    fn metadata_value_handles_nested_objects() {
+        let mut task = make_task();
+        task.metadata = Some(r#"{"config":{"timeout":30,"debug":true}}"#.to_string());
+        let val = task.metadata_value().unwrap();
+        assert_eq!(val["config"]["timeout"], 30);
+        assert_eq!(val["config"]["debug"], true);
+    }
+
+    #[test]
+    fn metadata_roundtrips_through_serde() {
+        let mut task = make_task();
+        task.metadata = Some(r#"{"key":"value"}"#.to_string());
+
+        let json = serde_json::to_string(&task).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["metadata"].as_str().unwrap(), r#"{"key":"value"}"#);
+    }
+
+    #[test]
+    fn metadata_null_in_serialized_json_when_none() {
+        let task = make_task();
+        let json = serde_json::to_string(&task).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["metadata"].is_null());
+    }
+
+    #[test]
+    fn metadata_deserialized_with_default_when_missing() {
+        let json = r#"{
+            "id": "t1", "project_id": "p1", "task_number": 1,
+            "title": "test", "status": "todo", "priority": "P2",
+            "pinned": 0, "focus_weight": 0,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "version": 1
+        }"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.metadata.is_none());
+        assert!(task.metadata_value().is_none());
+    }
 }

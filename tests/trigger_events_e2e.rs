@@ -54,6 +54,7 @@ async fn create_project(pool: &sqlx::SqlitePool, name: &str) -> Project {
         steering_refs: None,
         created_at: now.clone(),
         updated_at: now,
+        metadata: None,
         version: 1,
         last_edited_by: Some("test-actor".to_string()),
     };
@@ -92,6 +93,7 @@ async fn create_task(pool: &sqlx::SqlitePool, project_id: &str, title: &str, sta
         claim_lease_expires_at: None,
         pinned: 0,
         focus_weight: 0,
+        metadata: None,
         created_at: now.clone(),
         updated_at: now,
         version: 1,
@@ -933,6 +935,7 @@ async fn test_task_next_on_unblocked() {
         claim_lease_expires_at: None,
         pinned: 0,
         focus_weight: 0,
+        metadata: None,
         created_at: now.clone(),
         updated_at: now,
         version: 1,
@@ -1623,4 +1626,329 @@ async fn test_project_complete_with_tasks_emits_task_events() {
 
     let project_completed = events_of_type(&pool, "project.completed").await;
     assert_eq!(project_completed.len(), 1);
+}
+
+// ============================================================================
+// Metadata in event payload tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_task_created_event_includes_metadata() {
+    let pool = setup_pool().await;
+    let project = create_project(&pool, "meta-task-proj").await;
+
+    let num = db::counters::next(&pool, &format!("task:{}", project.id))
+        .await
+        .expect("counter");
+    let id = ids::generate_task_id(&project.id, num);
+    let now = chrono::Utc::now().to_rfc3339();
+    let task = Task {
+        id: id.clone(),
+        project_id: project.id.clone(),
+        task_number: num,
+        parent_task_id: None,
+        title: "metadata task".to_string(),
+        description: None,
+        status: "todo".to_string(),
+        priority: "P2".to_string(),
+        owner: None,
+        tags: None,
+        worker_ids: None,
+        run_ids: None,
+        blocked_reason: None,
+        started_at: None,
+        completed_at: None,
+        due_at: None,
+        claim_owner: None,
+        claim_claimed_at: None,
+        claim_lease_expires_at: None,
+        pinned: 0,
+        focus_weight: 0,
+        metadata: Some(r#"{"env":"staging","retries":3}"#.to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+        last_edited_by: Some("test-actor".to_string()),
+    };
+    db::tasks::create(&pool, &task).await.expect("create task");
+
+    let events = events_of_type(&pool, "task.created").await;
+    let ev = events.iter().find(|e| e.entity_id == id).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&ev.payload).unwrap();
+
+    // metadata should be a nested JSON object, not a string
+    assert!(
+        payload.get("metadata").is_some(),
+        "payload should contain metadata"
+    );
+    assert!(
+        payload["metadata"].is_object(),
+        "metadata should be a JSON object"
+    );
+    assert_eq!(payload["metadata"]["env"], "staging");
+    assert_eq!(payload["metadata"]["retries"], 3);
+}
+
+#[tokio::test]
+async fn test_task_created_event_metadata_null_when_absent() {
+    let pool = setup_pool().await;
+    let project = create_project(&pool, "meta-null-proj").await;
+    let task = create_task(&pool, &project.id, "no metadata", "todo").await;
+
+    let events = events_of_type(&pool, "task.created").await;
+    let ev = events.iter().find(|e| e.entity_id == task.id).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&ev.payload).unwrap();
+
+    assert!(
+        payload.get("metadata").is_some(),
+        "payload should have metadata key"
+    );
+    assert!(
+        payload["metadata"].is_null(),
+        "metadata should be null when not set"
+    );
+}
+
+#[tokio::test]
+async fn test_task_updated_event_includes_metadata() {
+    let pool = setup_pool().await;
+    let project = create_project(&pool, "meta-update-proj").await;
+    let task = create_task(&pool, &project.id, "update me", "todo").await;
+
+    // Update task with metadata
+    let mut task = db::tasks::get(&pool, &task.id).await.expect("get").unwrap();
+    task.metadata = Some(r#"{"branch":"feature/x"}"#.to_string());
+    task.title = "updated title".to_string();
+    db::tasks::update(&pool, &task).await.expect("update");
+
+    let events = events_of_type(&pool, "task.updated").await;
+    assert!(!events.is_empty(), "should have task.updated event");
+    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+
+    assert!(payload["metadata"].is_object());
+    assert_eq!(payload["metadata"]["branch"], "feature/x");
+}
+
+#[tokio::test]
+async fn test_project_created_event_includes_metadata() {
+    let pool = setup_pool().await;
+
+    let id = ids::generate_project_id("meta-proj");
+    let slug = ids::normalize_slug("meta-proj");
+    let now = chrono::Utc::now().to_rfc3339();
+    let project = Project {
+        id: id.clone(),
+        slug,
+        name: "meta-proj".to_string(),
+        description: None,
+        owner: None,
+        status: "active".to_string(),
+        tags: None,
+        default_session_policy: None,
+        steering_refs: None,
+        metadata: Some(r#"{"team":"platform","priority":"high"}"#.to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+        last_edited_by: Some("test-actor".to_string()),
+    };
+    db::projects::create(&pool, &project).await.expect("create");
+
+    let events = events_of_type(&pool, "project.created").await;
+    let ev = events.iter().find(|e| e.entity_id == id).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&ev.payload).unwrap();
+
+    assert!(payload["metadata"].is_object());
+    assert_eq!(payload["metadata"]["team"], "platform");
+    assert_eq!(payload["metadata"]["priority"], "high");
+}
+
+#[tokio::test]
+async fn test_task_next_event_includes_metadata() {
+    let pool = setup_pool().await;
+    let project = create_project(&pool, "meta-next-proj").await;
+
+    let num = db::counters::next(&pool, &format!("task:{}", project.id))
+        .await
+        .expect("counter");
+    let id = ids::generate_task_id(&project.id, num);
+    let now = chrono::Utc::now().to_rfc3339();
+    let task = Task {
+        id: id.clone(),
+        project_id: project.id.clone(),
+        task_number: num,
+        parent_task_id: None,
+        title: "next with meta".to_string(),
+        description: None,
+        status: "todo".to_string(),
+        priority: "P1".to_string(),
+        owner: None,
+        tags: None,
+        worker_ids: None,
+        run_ids: None,
+        blocked_reason: None,
+        started_at: None,
+        completed_at: None,
+        due_at: None,
+        claim_owner: None,
+        claim_claimed_at: None,
+        claim_lease_expires_at: None,
+        pinned: 0,
+        focus_weight: 0,
+        metadata: Some(r#"{"worktree":"/tmp/proj"}"#.to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+        last_edited_by: Some("test-actor".to_string()),
+    };
+    db::tasks::create(&pool, &task).await.expect("create");
+
+    // task.next fires on insert for todo tasks in active projects
+    let next_events: Vec<_> = events_of_type(&pool, "task.next")
+        .await
+        .into_iter()
+        .filter(|e| e.entity_id == id)
+        .collect();
+    assert_eq!(next_events.len(), 1, "should have 1 task.next");
+
+    let payload: serde_json::Value = serde_json::from_str(&next_events[0].payload).unwrap();
+    assert!(payload["metadata"].is_object());
+    assert_eq!(payload["metadata"]["worktree"], "/tmp/proj");
+}
+
+#[tokio::test]
+async fn test_task_metadata_roundtrip_through_db() {
+    let pool = setup_pool().await;
+    let project = create_project(&pool, "meta-rt-proj").await;
+
+    let num = db::counters::next(&pool, &format!("task:{}", project.id))
+        .await
+        .expect("counter");
+    let id = ids::generate_task_id(&project.id, num);
+    let now = chrono::Utc::now().to_rfc3339();
+    let task = Task {
+        id: id.clone(),
+        project_id: project.id.clone(),
+        task_number: num,
+        parent_task_id: None,
+        title: "roundtrip".to_string(),
+        description: None,
+        status: "todo".to_string(),
+        priority: "P2".to_string(),
+        owner: None,
+        tags: None,
+        worker_ids: None,
+        run_ids: None,
+        blocked_reason: None,
+        started_at: None,
+        completed_at: None,
+        due_at: None,
+        claim_owner: None,
+        claim_claimed_at: None,
+        claim_lease_expires_at: None,
+        pinned: 0,
+        focus_weight: 0,
+        metadata: Some(r#"{"a":1,"b":"two"}"#.to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+        last_edited_by: None,
+    };
+    db::tasks::create(&pool, &task).await.expect("create");
+
+    // Read back and verify metadata survived
+    let fetched = db::tasks::get(&pool, &id).await.expect("get").unwrap();
+    assert_eq!(fetched.metadata.as_deref(), Some(r#"{"a":1,"b":"two"}"#));
+
+    let val = fetched.metadata_value().unwrap();
+    assert_eq!(val["a"], 1);
+    assert_eq!(val["b"], "two");
+}
+
+#[tokio::test]
+async fn test_project_metadata_roundtrip_through_db() {
+    let pool = setup_pool().await;
+
+    let id = ids::generate_project_id("meta-rt-project");
+    let slug = ids::normalize_slug("meta-rt-project");
+    let now = chrono::Utc::now().to_rfc3339();
+    let project = Project {
+        id: id.clone(),
+        slug,
+        name: "meta-rt-project".to_string(),
+        description: None,
+        owner: None,
+        status: "active".to_string(),
+        tags: None,
+        default_session_policy: None,
+        steering_refs: None,
+        metadata: Some(r#"{"region":"us-east"}"#.to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+        last_edited_by: None,
+    };
+    db::projects::create(&pool, &project).await.expect("create");
+
+    let fetched = db::projects::get(&pool, &id).await.expect("get").unwrap();
+    assert_eq!(fetched.metadata.as_deref(), Some(r#"{"region":"us-east"}"#));
+
+    let val = fetched.metadata_value().unwrap();
+    assert_eq!(val["region"], "us-east");
+}
+
+#[tokio::test]
+async fn test_task_metadata_update_reflected_in_event() {
+    let pool = setup_pool().await;
+    let project = create_project(&pool, "meta-upd-evt-proj").await;
+
+    let num = db::counters::next(&pool, &format!("task:{}", project.id))
+        .await
+        .expect("counter");
+    let id = ids::generate_task_id(&project.id, num);
+    let now = chrono::Utc::now().to_rfc3339();
+    let task = Task {
+        id: id.clone(),
+        project_id: project.id.clone(),
+        task_number: num,
+        parent_task_id: None,
+        title: "evolving metadata".to_string(),
+        description: None,
+        status: "todo".to_string(),
+        priority: "P2".to_string(),
+        owner: None,
+        tags: None,
+        worker_ids: None,
+        run_ids: None,
+        blocked_reason: None,
+        started_at: None,
+        completed_at: None,
+        due_at: None,
+        claim_owner: None,
+        claim_claimed_at: None,
+        claim_lease_expires_at: None,
+        pinned: 0,
+        focus_weight: 0,
+        metadata: Some(r#"{"version":1}"#.to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+        version: 1,
+        last_edited_by: None,
+    };
+    db::tasks::create(&pool, &task).await.expect("create");
+
+    // Update metadata
+    let mut task = db::tasks::get(&pool, &id).await.expect("get").unwrap();
+    task.metadata = Some(r#"{"version":2,"extra":"field"}"#.to_string());
+    task.title = "updated metadata task".to_string();
+    db::tasks::update(&pool, &task).await.expect("update");
+
+    // Check task.updated event has the new metadata
+    let events = events_of_type(&pool, "task.updated").await;
+    let ev = events.iter().find(|e| e.entity_id == id).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&ev.payload).unwrap();
+
+    assert!(payload["metadata"].is_object());
+    assert_eq!(payload["metadata"]["version"], 2);
+    assert_eq!(payload["metadata"]["extra"], "field");
 }

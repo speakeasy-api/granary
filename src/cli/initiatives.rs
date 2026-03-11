@@ -169,8 +169,9 @@ pub async fn initiative(
                 description,
                 owner,
                 tags,
+                metadata,
             }),
-        ) => create_initiative(&name, description, owner, tags, cli_format).await,
+        ) => create_initiative(&name, description, owner, tags, metadata, cli_format).await,
 
         // No ID, other action → error (need an ID for non-create actions)
         (None, Some(_)) => Err(crate::error::GranaryError::InvalidArgument(
@@ -220,8 +221,18 @@ async fn handle_initiative_action(
             description,
             owner,
             tags,
+            metadata,
         } => {
             let parsed_tags = tags.map(|t| parse_tags(&t));
+            let metadata = metadata
+                .map(|m| serde_json::from_str(&m))
+                .transpose()
+                .map_err(|e| {
+                    crate::error::GranaryError::InvalidArgument(format!(
+                        "Invalid metadata JSON: {}",
+                        e
+                    ))
+                })?;
 
             let initiative = services::update_initiative(
                 pool,
@@ -231,6 +242,7 @@ async fn handle_initiative_action(
                     description,
                     owner,
                     tags: parsed_tags,
+                    metadata,
                     ..Default::default()
                 },
             )
@@ -320,6 +332,7 @@ async fn create_initiative(
     description: Option<String>,
     owner: Option<String>,
     tags: Option<String>,
+    metadata: Option<String>,
     cli_format: Option<CliOutputFormat>,
 ) -> Result<()> {
     let workspace = Workspace::find()?;
@@ -329,6 +342,13 @@ async fn create_initiative(
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
 
+    let metadata: Option<serde_json::Value> = metadata
+        .map(|m| serde_json::from_str(&m))
+        .transpose()
+        .map_err(|e| {
+            crate::error::GranaryError::InvalidArgument(format!("Invalid metadata JSON: {}", e))
+        })?;
+
     let initiative = services::create_initiative(
         &pool,
         CreateInitiative {
@@ -336,6 +356,7 @@ async fn create_initiative(
             description,
             owner,
             tags,
+            metadata,
         },
     )
     .await?;
